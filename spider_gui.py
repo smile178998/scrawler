@@ -298,7 +298,7 @@ LABEL_F   = ("Segoe UI", 9)
 class ScraperApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Modern Web Scraper — Playwright Edition")
+        self.title("Modern Web Scraper")
         self.geometry("1160x820")
         self.minsize(940, 660)
         self.configure(bg=BG)
