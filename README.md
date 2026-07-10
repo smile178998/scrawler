@@ -1,4 +1,4 @@
-# Modern Web Scraper — Playwright Edition
+# Modern Web Scraper 
 
 A desktop web scraping tool powered by **Playwright (real Chromium engine)**, with a clean, light-themed Tkinter GUI. Unlike traditional `requests` + `BeautifulSoup` scrapers, this tool renders pages through an actual browser, so it can handle JavaScript-heavy SPAs, lazy-loaded content, and more.
 
