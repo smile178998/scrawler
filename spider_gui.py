@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Modern Web Scraper — Playwright Edition
-========================================
+Modern Web Scraper — Playwright Edition (Light UI)
+====================================================
 • Real Chromium browser engine — handles JavaScript, SPAs, lazy loading
 • Extracts: body text, comments (heuristic), video links, images, metadata
 • Optional CSS selectors for precise extraction on specific sites
 • Cookie support to bypass anti-bot protection (521/403 errors)
 • Export results to TXT or JSON
+• Clean, light (white) interface
 
 Dependencies:
   pip install playwright beautifulsoup4 lxml
@@ -16,7 +17,6 @@ Dependencies:
 
 import json
 import queue
-import re
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -36,24 +36,18 @@ COMMENT_HINTS = [
 VIDEO_EXTS = (".mp4", ".m3u8", ".flv", ".webm", ".mov", ".avi")
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")
 
-# Known main-content containers for common blog / CMS platforms.
-# Tried in order; the first one with substantial text wins.
 COMMON_CONTENT_SELECTORS = [
-    "#cnblogs_post_body",        # cnblogs.com
-    ".postBody", ".post_body",   # cnblogs / generic blog themes
+    "#cnblogs_post_body",
+    ".postBody", ".post_body",
     "#article_content", ".article-content", ".article__content",
     ".entry-content", ".post-content", ".post-body",
-    "#js_content",                # WeChat articles
-    ".markdown-body",             # GitHub / many docs sites
-    "#content_views",             # CSDN
+    "#js_content",
+    ".markdown-body",
+    "#content_views",
     ".content-detail", ".detail-content",
     "article", "main",
 ]
 
-# Elements whose class/id contains any of these are treated as
-# navigation / sidebar / recommendation widgets, never as real
-# article text or real user comments — even if they also match
-# COMMENT_HINTS (e.g. a "Hot Comments Ranking" sidebar widget).
 SIDEBAR_HINTS = [
     "sidebar", "side-bar", "aside", "nav", "menu", "footer", "header",
     "recommend", "related", "hot", "rank", "paihang", "tuijian",
@@ -63,23 +57,20 @@ SIDEBAR_HINTS = [
 
 
 def _is_sidebar(tag) -> bool:
-    """True if a tag's class/id marks it as nav/sidebar/recommendation noise."""
     cls = " ".join(tag.get("class") or []) + " " + (tag.get("id") or "")
     cls = cls.lower()
     return any(h in cls for h in SIDEBAR_HINTS)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Scraping pipeline
+# Scraping pipeline (unchanged logic)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def browser_fetch(url: str, wait_ms: int, cookie: str,
                   scroll: bool, log_q: queue.Queue) -> dict:
-    """Launch headless Chromium, render the page, return raw data."""
-
     def log(msg: str):
         log_q.put(("log", msg))
 
-    log(f"[Browser] Launching Chromium …")
+    log("[Browser] Launching Chromium …")
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -93,7 +84,6 @@ def browser_fetch(url: str, wait_ms: int, cookie: str,
             locale="en-US",
         )
 
-        # Inject cookies if provided
         if cookie.strip():
             parsed = urlparse(url)
             domain = parsed.netloc
@@ -130,7 +120,6 @@ def browser_fetch(url: str, wait_ms: int, cookie: str,
         title = page.title()
         inner = page.evaluate("document.body.innerText")
 
-        # Collect all <video> src and network-intercepted media URLs
         video_urls = list(page.evaluate("""
             () => {
                 const vids = [];
@@ -163,25 +152,19 @@ def browser_fetch(url: str, wait_ms: int, cookie: str,
 
 
 def parse_content(data: dict, text_sel: str, comment_sel: str) -> dict:
-    """Parse HTML with BeautifulSoup, extract text / comments / videos / images."""
     soup    = BeautifulSoup(data["html"], "lxml")
     base    = data["url"]
     title   = data["title"] or _bs_title(soup)
 
-    # ── Text ──
     paragraphs = _extract_text(soup, text_sel)
-
-    # ── Comments ──
     comments = _extract_comments(soup, comment_sel)
 
-    # ── Videos ──
     videos = list(data["video_urls_from_dom"])
     for a in soup.find_all("a", href=True):
         if a["href"].lower().endswith(VIDEO_EXTS):
             videos.append(urljoin(base, a["href"]))
     videos = _dedup(videos)
 
-    # ── Images ──
     images = []
     for img in soup.find_all("img", src=True):
         src = urljoin(base, img["src"])
@@ -189,7 +172,6 @@ def parse_content(data: dict, text_sel: str, comment_sel: str) -> dict:
             images.append(src)
     images = images[:50]
 
-    # ── Metadata ──
     meta = {}
     for tag in soup.find_all("meta"):
         name = tag.get("name") or tag.get("property") or ""
@@ -222,9 +204,6 @@ def _extract_text(soup: BeautifulSoup, sel: str) -> list:
         if result:
             return result
 
-    # 1) Try known blog/CMS main-content containers first — this avoids
-    #    picking up sidebar "recommended posts" / "hot ranking" widgets
-    #    that a bare <article> or whole-page scan would sweep in.
     container = None
     for css in COMMON_CONTENT_SELECTORS:
         node = soup.select_one(css)
@@ -234,14 +213,11 @@ def _extract_text(soup: BeautifulSoup, sel: str) -> list:
     if container is None:
         container = soup.find("article") or soup
 
-    # 2) Pull structural text nodes (headings, paragraphs, list items,
-    #    code blocks) so tutorials/code-heavy articles aren't truncated.
     paras = [p.get_text(strip=True, separator=" ")
              for p in container.find_all(["p", "h2", "h3", "h4", "h5",
                                            "li", "pre", "code", "blockquote"])
              if len(p.get_text(strip=True)) > 1 and not _is_sidebar(p)]
 
-    # 3) Fallback: scan raw <div> blocks, but skip anything sidebar-like.
     if len(paras) < 3:
         seen, paras = set(), []
         for div in container.find_all("div"):
@@ -263,10 +239,6 @@ def _extract_comments(soup: BeautifulSoup, sel: str) -> list:
 
     seen, results = set(), []
     for tag in soup.find_all(["div", "li", "section"]):
-        # Skip nav/sidebar/"hot ranking"/"recommended" widgets — these
-        # often contain the word "comment" in their class/id (e.g. a
-        # "Popular Comments Ranking" sidebar panel) but are not actual
-        # user comments on this article.
         if _is_sidebar(tag):
             continue
         cls = " ".join(tag.get("class") or []) + " " + (tag.get("id") or "")
@@ -299,30 +271,36 @@ def run_pipeline(url: str, text_sel: str, comment_sel: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GUI
+# GUI — Light / White theme
 # ─────────────────────────────────────────────────────────────────────────────
 
-BG      = "#F6F5F5"
-PANEL   = "#060606"
-CARD    = "#0f3460"
-ACCENT  = "#e94560"
-ACCENT2 = "#53d8fb"
-FG      = "#eaeaea"
-DIM     = "#8888aa"
-SUCCESS = "#4ade80"
-ERR     = "#f87171"
-MONO    = ("Consolas", 9)
-UI      = ("Segoe UI", 10)
-BOLD    = ("Segoe UI Semibold", 10)
-H1      = ("Segoe UI Semibold", 14)
+# Palette — clean, white-based, soft accents (Notion / Linear inspired)
+BG        = "#FFFFFF"   # main window background
+PANEL     = "#FFFFFF"   # text widget background
+CARD      = "#F7F8FA"   # card / grouped-section background
+CARD_BD   = "#E5E7EB"   # card border
+INPUT_BG  = "#FFFFFF"
+INPUT_BD  = "#D8DCE3"
+ACCENT    = "#4F6BF6"   # primary blue
+ACCENT_HV = "#3D56D9"
+ACCENT_SOFT = "#EEF1FE"
+FG        = "#1F2430"   # main text
+DIM       = "#8A8F98"   # secondary text
+SUCCESS   = "#1E9E5A"
+ERR       = "#E5484D"
+MONO      = ("Consolas", 9)
+UI        = ("Segoe UI", 10)
+BOLD      = ("Segoe UI Semibold", 10)
+H1        = ("Segoe UI Semibold", 15)
+LABEL_F   = ("Segoe UI", 9)
 
 
 class ScraperApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Modern Web Scraper — Playwright Edition")
-        self.geometry("1120x800")
-        self.minsize(900, 640)
+        self.geometry("1160x820")
+        self.minsize(940, 660)
         self.configure(bg=BG)
 
         self._q: queue.Queue = queue.Queue()
@@ -337,137 +315,171 @@ class ScraperApp(tk.Tk):
         s = ttk.Style(self)
         s.theme_use("clam")
         s.configure(".", background=BG, foreground=FG,
-                    fieldbackground=PANEL, font=UI, bordercolor=CARD)
+                    fieldbackground=INPUT_BG, font=UI, bordercolor=INPUT_BD)
 
-        s.configure("TFrame",  background=BG)
-        s.configure("Card.TFrame", background=PANEL)
-        s.configure("TLabel",  background=BG,    foreground=FG,  font=UI)
-        s.configure("Dim.TLabel", background=BG, foreground=DIM, font=("Segoe UI", 9))
-        s.configure("H1.TLabel",  background=BG, foreground=FG,  font=H1)
-        s.configure("Tag.TLabel", background=CARD, foreground=ACCENT2,
-                    font=("Segoe UI", 9), padding=(6, 2))
+        s.configure("TFrame", background=BG)
+        s.configure("Card.TFrame", background=CARD)
 
-        s.configure("TEntry", fieldbackground=PANEL, foreground=FG,
-                    insertcolor=FG, bordercolor=CARD,
-                    lightcolor=CARD, darkcolor=CARD)
+        s.configure("TLabel", background=BG, foreground=FG, font=UI)
+        s.configure("Dim.TLabel", background=BG, foreground=DIM, font=LABEL_F)
+        s.configure("CardDim.TLabel", background=CARD, foreground=DIM, font=LABEL_F)
+        s.configure("H1.TLabel", background=BG, foreground=FG, font=H1)
+        s.configure("Sub.TLabel", background=BG, foreground=DIM, font=("Segoe UI", 9))
 
-        s.configure("TButton", background=ACCENT, foreground="#fff",
-                    font=BOLD, padding=(14, 7), borderwidth=0, relief="flat")
-        s.map("TButton",
-              background=[("active", "#c73652"), ("disabled", "#444")],
-              foreground=[("disabled", "#777")])
+        # Entries — soft border, white fill
+        s.configure("TEntry", fieldbackground=INPUT_BG, foreground=FG,
+                    insertcolor=FG, bordercolor=INPUT_BD,
+                    lightcolor=INPUT_BD, darkcolor=INPUT_BD, padding=6)
+        s.map("TEntry",
+              bordercolor=[("focus", ACCENT)],
+              lightcolor=[("focus", ACCENT)],
+              darkcolor=[("focus", ACCENT)])
 
-        s.configure("Ghost.TButton", background=PANEL, foreground=ACCENT2,
-                    font=UI, padding=(10, 5), borderwidth=0)
-        s.map("Ghost.TButton", background=[("active", CARD)])
+        # Primary button — accent blue
+        s.configure("Primary.TButton", background=ACCENT, foreground="#FFFFFF",
+                    font=BOLD, padding=(18, 9), borderwidth=0, relief="flat")
+        s.map("Primary.TButton",
+              background=[("active", ACCENT_HV), ("disabled", "#C7CDF7")],
+              foreground=[("disabled", "#FFFFFF")])
 
+        # Secondary / ghost button — light card look
+        s.configure("Ghost.TButton", background=CARD, foreground=FG,
+                    font=UI, padding=(12, 6), borderwidth=1,
+                    bordercolor=CARD_BD, relief="flat")
+        s.map("Ghost.TButton",
+              background=[("active", "#EDEFF3")],
+              bordercolor=[("active", CARD_BD)])
+
+        # Tabs
         s.configure("TNotebook", background=BG, borderwidth=0)
-        s.configure("TNotebook.Tab", background=PANEL, foreground=DIM,
-                    padding=(16, 7), font=UI)
+        s.configure("TNotebook.Tab", background=CARD, foreground=DIM,
+                    padding=(16, 8), font=UI, borderwidth=0)
         s.map("TNotebook.Tab",
               background=[("selected", BG)],
               foreground=[("selected", ACCENT)])
+        s.layout("TNotebook.Tab", s.layout("TNotebook.Tab"))  # keep default layout
 
-        s.configure("TLabelframe", background=BG, bordercolor=CARD)
-        s.configure("TLabelframe.Label", background=BG, foreground=DIM,
-                    font=("Segoe UI", 9))
+        # Group box (Options card)
+        s.configure("TLabelframe", background=BG, bordercolor=CARD_BD, borderwidth=1)
+        s.configure("TLabelframe.Label", background=BG, foreground=DIM, font=LABEL_F)
 
         s.configure("TCheckbutton", background=BG, foreground=FG, font=UI)
         s.map("TCheckbutton", background=[("active", BG)])
 
-        s.configure("TProgressbar", troughcolor=PANEL,
-                    background=ACCENT, borderwidth=0)
-        s.configure("TSeparator", background=CARD)
+        s.configure("TProgressbar", troughcolor=CARD, background=ACCENT,
+                    borderwidth=0, thickness=4)
+        s.configure("TSeparator", background=CARD_BD)
 
-        # Spinbox style (ttk.Spinbox doesn't accept background/foreground/
-        # buttonbackground as direct constructor kwargs — must go through Style)
-        s.configure("TSpinbox", fieldbackground=PANEL, foreground=FG,
-                    background=PANEL, bordercolor=CARD,
-                    arrowcolor=FG, insertcolor=FG)
+        s.configure("TSpinbox", fieldbackground=INPUT_BG, foreground=FG,
+                    background=INPUT_BG, bordercolor=INPUT_BD,
+                    arrowcolor=DIM, insertcolor=FG, padding=4)
         s.map("TSpinbox",
-              fieldbackground=[("readonly", PANEL)],
+              fieldbackground=[("readonly", INPUT_BG)],
               background=[("active", CARD)])
 
     # ── Layout ─────────────────────────────────────────────────────────────
     def _build(self):
-        P = dict(padx=14, pady=6)
+        P = dict(padx=18, pady=6)
 
         # ── Header ──────────────────────────────────────────────
         hdr = ttk.Frame(self)
-        hdr.pack(fill="x", padx=14, pady=(14, 6))
+        hdr.pack(fill="x", padx=18, pady=(18, 4))
 
-        tk.Label(hdr, text="🕷  Modern Web Scraper",
-                 bg=BG, fg=ACCENT, font=H1).pack(side="left")
-        tk.Label(hdr, text="  Real Chromium browser · handles JS / SPAs / lazy-load",
-                 bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side="left", padx=6)
+        title_row = ttk.Frame(hdr)
+        title_row.pack(fill="x")
+        tk.Label(title_row, text="🕷", bg=BG, fg=ACCENT,
+                 font=("Segoe UI", 18)).pack(side="left")
+        tk.Label(title_row, text="  Modern Web Scraper",
+                 bg=BG, fg=FG, font=H1).pack(side="left")
+        tk.Label(title_row, text="   Real Chromium browser · handles JS / SPAs / lazy-load",
+                 bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side="left", padx=(4, 0))
 
-        ttk.Separator(self).pack(fill="x", padx=14, pady=(4, 10))
+        ttk.Separator(self).pack(fill="x", padx=18, pady=(12, 12))
 
-        # ── URL ─────────────────────────────────────────────────
-        url_row = ttk.Frame(self)
-        url_row.pack(fill="x", **P)
-        tk.Label(url_row, text="URL", bg=BG, fg=DIM,
-                 font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        # ── URL input card ──────────────────────────────────────
+        url_card = tk.Frame(self, bg=CARD, highlightbackground=CARD_BD,
+                             highlightthickness=1, bd=0)
+        url_card.pack(fill="x", padx=18, pady=(0, 12))
+        inner = tk.Frame(url_card, bg=CARD)
+        inner.pack(fill="x", padx=14, pady=12)
+
+        tk.Label(inner, text="Target URL", bg=CARD, fg=DIM,
+                 font=LABEL_F).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
         self.url_var = tk.StringVar()
-        ttk.Entry(url_row, textvariable=self.url_var,
-                  font=("Segoe UI", 11)).grid(row=0, column=1, sticky="we", padx=(0, 10))
-        self.run_btn = ttk.Button(url_row, text="▶  Scrape", command=self._start)
-        self.run_btn.grid(row=0, column=2)
-        url_row.columnconfigure(1, weight=1)
+        url_entry = ttk.Entry(inner, textvariable=self.url_var, font=("Segoe UI", 11))
+        url_entry.grid(row=1, column=0, sticky="we", padx=(0, 10), ipady=3)
+        url_entry.bind("<Return>", lambda e: self._start())
+
+        self.run_btn = ttk.Button(inner, text="▶  Scrape", style="Primary.TButton",
+                                   command=self._start)
+        self.run_btn.grid(row=1, column=1)
+        inner.columnconfigure(0, weight=1)
 
         # ── Options card ────────────────────────────────────────
-        opt = ttk.LabelFrame(self, text="  Options")
-        opt.pack(fill="x", **P)
+        opt_card = tk.Frame(self, bg=CARD, highlightbackground=CARD_BD,
+                             highlightthickness=1, bd=0)
+        opt_card.pack(fill="x", padx=18, pady=(0, 12))
+        opt = tk.Frame(opt_card, bg=CARD)
+        opt.pack(fill="x", padx=14, pady=12)
 
-        # Row 0 — selectors
-        tk.Label(opt, text="Text selector", bg=BG, fg=DIM,
-                 font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", padx=(8, 4), pady=6)
+        tk.Label(opt, text="Advanced Options", bg=CARD, fg=DIM,
+                 font=LABEL_F).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+        # Row 1 — selectors
+        tk.Label(opt, text="Text selector (CSS)", bg=CARD, fg=DIM,
+                 font=LABEL_F).grid(row=1, column=0, sticky="w", padx=(0, 6), pady=4)
         self.text_sel_var = tk.StringVar()
         ttk.Entry(opt, textvariable=self.text_sel_var,
-                  width=30).grid(row=0, column=1, sticky="we", padx=(0, 18))
+                  width=28).grid(row=1, column=1, sticky="we", padx=(0, 24), pady=4, ipady=2)
 
-        tk.Label(opt, text="Comment selector", bg=BG, fg=DIM,
-                 font=("Segoe UI", 9)).grid(row=0, column=2, sticky="w", padx=(0, 4))
+        tk.Label(opt, text="Comment selector (CSS)", bg=CARD, fg=DIM,
+                 font=LABEL_F).grid(row=1, column=2, sticky="w", padx=(0, 6), pady=4)
         self.cmt_sel_var = tk.StringVar()
         ttk.Entry(opt, textvariable=self.cmt_sel_var,
-                  width=30).grid(row=0, column=3, sticky="we", padx=(0, 18))
+                  width=28).grid(row=1, column=3, sticky="we", pady=4, ipady=2)
 
         opt.columnconfigure(1, weight=1)
         opt.columnconfigure(3, weight=1)
 
-        # Row 1 — cookie
-        tk.Label(opt, text="Cookie (optional)", bg=BG, fg=DIM,
-                 font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", padx=(8, 4), pady=4)
+        # Row 2 — cookie
+        tk.Label(opt, text="Cookie (optional, bypasses anti-bot checks)", bg=CARD, fg=DIM,
+                 font=LABEL_F).grid(row=2, column=0, sticky="w", padx=(0, 6), pady=4)
         self.cookie_var = tk.StringVar()
         ttk.Entry(opt, textvariable=self.cookie_var,
-                  show="•").grid(row=1, column=1, columnspan=3,
-                                 sticky="we", padx=(0, 8), pady=4)
+                  show="•").grid(row=2, column=1, columnspan=3,
+                                 sticky="we", pady=4, ipady=2)
 
-        # Row 2 — JS wait + scroll toggle
-        tk.Label(opt, text="JS wait (ms)", bg=BG, fg=DIM,
-                 font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", padx=(8, 4), pady=(4, 8))
+        # Row 3 — JS wait + scroll toggle
+        wait_row = tk.Frame(opt, bg=CARD)
+        wait_row.grid(row=3, column=0, columnspan=4, sticky="we", pady=(10, 0))
+
+        tk.Label(wait_row, text="JS wait (ms)", bg=CARD, fg=DIM,
+                 font=LABEL_F).pack(side="left", padx=(0, 8))
         self.wait_var = tk.IntVar(value=2500)
-        ttk.Spinbox(opt, from_=500, to=12000, increment=500,
+        ttk.Spinbox(wait_row, from_=500, to=12000, increment=500,
                     textvariable=self.wait_var, width=8,
-                    style="TSpinbox").grid(row=2, column=1, sticky="w", pady=(4, 8))
+                    style="TSpinbox").pack(side="left", padx=(0, 28))
 
         self.scroll_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt, text="Auto-scroll (triggers lazy images/comments)",
-                        variable=self.scroll_var).grid(
-            row=2, column=2, columnspan=2, sticky="w", padx=(0, 8), pady=(4, 8))
+        ttk.Checkbutton(wait_row, text="Auto-scroll (triggers lazy images/comments)",
+                        variable=self.scroll_var).pack(side="left")
 
         tk.Label(opt,
-                 text="Tip: leave selectors blank for auto-detection. "
-                      "Increase JS wait for slow React/Vue SPAs.",
-                 bg=BG, fg=DIM, font=("Segoe UI", 8)).grid(
-            row=3, column=0, columnspan=4, sticky="w", padx=(8, 8), pady=(0, 6))
+                 text="Tip: leave selectors blank for auto-detection. Increase JS wait for slow React/Vue SPAs.",
+                 bg=CARD, fg=DIM, font=("Segoe UI", 8)).grid(
+            row=4, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
         # ── Progress ────────────────────────────────────────────
         self.prog = ttk.Progressbar(self, mode="indeterminate")
 
         # ── Tabs ────────────────────────────────────────────────
-        self.nb = ttk.Notebook(self)
-        self.nb.pack(fill="both", expand=True, padx=14, pady=6)
+        tabs_wrap = tk.Frame(self, bg=BG, highlightbackground=CARD_BD,
+                              highlightthickness=1)
+        tabs_wrap.pack(fill="both", expand=True, padx=18, pady=(0, 6))
+
+        self.nb = ttk.Notebook(tabs_wrap)
+        self.nb.pack(fill="both", expand=True, padx=1, pady=1)
 
         self.text_box    = self._tab("📄  Body Text")
         self.comment_box = self._tab("💬  Comments")
@@ -478,28 +490,29 @@ class ScraperApp(tk.Tk):
 
         # ── Bottom bar ──────────────────────────────────────────
         bar = ttk.Frame(self)
-        bar.pack(fill="x", padx=14, pady=(2, 10))
+        bar.pack(fill="x", padx=18, pady=(2, 16))
 
         for label, cmd in [
-            ("Save TXT",  self._save_txt),
-            ("Save JSON", self._save_json),
-            ("Clear",     self._clear),
+            ("💾  Save TXT",  self._save_txt),
+            ("💾  Save JSON", self._save_json),
+            ("🗑  Clear",     self._clear),
         ]:
             ttk.Button(bar, text=label, style="Ghost.TButton",
-                       command=cmd).pack(side="left", padx=(0, 6))
+                       command=cmd).pack(side="left", padx=(0, 8))
 
         self.status_var = tk.StringVar(value="Ready.")
         tk.Label(bar, textvariable=self.status_var,
-                 bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side="left", padx=8)
+                 bg=BG, fg=DIM, font=("Segoe UI", 9)).pack(side="left", padx=10)
 
     def _tab(self, label: str) -> scrolledtext.ScrolledText:
-        frame = ttk.Frame(self.nb)
+        frame = tk.Frame(self.nb, bg=BG)
         self.nb.add(frame, text=label)
         box = scrolledtext.ScrolledText(
             frame, wrap="word", font=MONO,
             bg=PANEL, fg=FG, insertbackground=FG,
-            selectbackground=ACCENT, relief="flat", borderwidth=0)
-        box.pack(fill="both", expand=True, padx=4, pady=4)
+            selectbackground=ACCENT_SOFT, selectforeground=FG,
+            relief="flat", borderwidth=0, padx=10, pady=8)
+        box.pack(fill="both", expand=True, padx=8, pady=8)
         box.configure(state="disabled")
         return box
 
@@ -551,7 +564,6 @@ class ScraperApp(tk.Tk):
 
     # ── Render results ─────────────────────────────────────────────────────
     def _render(self, r: dict):
-        # Text
         lines = [f"Title : {r['title']}", f"URL   : {r['url']}", "=" * 60, ""]
         for i, p in enumerate(r["text_paragraphs"], 1):
             lines.append(f"[{i}]  {p}\n")
@@ -559,7 +571,6 @@ class ScraperApp(tk.Tk):
             lines.append("(Nothing found — try adding a Text selector in Options)")
         self._set_text(self.text_box, "\n".join(lines))
 
-        # Comments
         if r["comments"]:
             self._set_text(self.comment_box,
                            "\n\n".join(f"[{i}]  {c}" for i, c in enumerate(r["comments"], 1)))
@@ -570,27 +581,22 @@ class ScraperApp(tk.Tk):
                 "Try: open DevTools → Network → XHR to find the comment API endpoint,\n"
                 "or add a Comment selector in Options (e.g. '.comment-body').")
 
-        # Videos
         if r["videos"]:
             self._set_text(self.video_box,
                            "\n".join(f"[{i}]  {v}" for i, v in enumerate(r["videos"], 1)))
         else:
             self._set_text(self.video_box, "(No <video> tags or known embeds found.)")
 
-        # Images
         if r["images"]:
             self._set_text(self.image_box,
                            "\n".join(f"[{i}]  {v}" for i, v in enumerate(r["images"], 1)))
         else:
             self._set_text(self.image_box, "(No images found.)")
 
-        # Meta / full JSON
         self._set_text(self.meta_box, json.dumps(r, ensure_ascii=False, indent=2))
 
-        # Switch to text tab
         self.nb.select(0)
 
-        # Update log with summary
         self._append(self.log_box,
             f"\n✅ Summary\n"
             f"   Paragraphs : {len(r['text_paragraphs'])}\n"
@@ -646,7 +652,7 @@ class ScraperApp(tk.Tk):
     # ── Helpers ────────────────────────────────────────────────────────────
     def _set_busy(self, msg: str):
         self.run_btn.config(state="disabled")
-        self.prog.pack(fill="x", padx=14, pady=(0, 4))
+        self.prog.pack(fill="x", padx=18, pady=(0, 6))
         self.prog.start(10)
         self.status_var.set(msg)
 
