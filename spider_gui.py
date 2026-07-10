@@ -7,16 +7,27 @@ Modern Web Scraper — Playwright Edition (Light UI)
 • Extracts: body text, comments (heuristic), video links, images, metadata
 • Optional CSS selectors for precise extraction on specific sites
 • Cookie support to bypass anti-bot protection (521/403 errors)
+• Basic stealth: hides common automation fingerprints, randomizes UA/viewport,
+  randomizes timing to look less "robotic"
 • Export results to TXT or JSON
 • Clean, light (white) interface
 
 Dependencies:
-  pip install playwright beautifulsoup4 lxml
+  pip install playwright beautifulsoup4 lxml playwright-stealth
   python -m playwright install chromium
+
+Notes on responsible use:
+  This tool is meant for scraping content you're authorized to access
+  (public pages, your own sites, or sites whose terms permit automated
+  access). It does not attempt to defeat CAPTCHAs, paywalls, or
+  enterprise-grade bot-mitigation services (Cloudflare/DataDome/etc.).
+  Always check a site's robots.txt and terms of service, and keep your
+  request rate reasonable.
 """
 
 import json
 import queue
+import random
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -24,6 +35,12 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
+
+try:
+    from playwright_stealth import stealth_sync
+    HAS_STEALTH = True
+except ImportError:
+    HAS_STEALTH = False
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -55,6 +72,40 @@ SIDEBAR_HINTS = [
     "share", "social", "tag-list", "catalog",
 ]
 
+# A small pool of realistic, common desktop UAs to rotate through.
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+]
+
+VIEWPORTS = [
+    {"width": 1280, "height": 900},
+    {"width": 1366, "height": 768},
+    {"width": 1440, "height": 900},
+    {"width": 1536, "height": 864},
+]
+
+# Manual fallback stealth script (used if playwright-stealth isn't installed).
+# Patches the most commonly checked automation fingerprints.
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+window.chrome = window.chrome || { runtime: {} };
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : originalQuery(parameters)
+);
+"""
+
 
 def _is_sidebar(tag) -> bool:
     cls = " ".join(tag.get("class") or []) + " " + (tag.get("id") or "")
@@ -62,7 +113,7 @@ def _is_sidebar(tag) -> bool:
     return any(h in cls for h in SIDEBAR_HINTS)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Scraping pipeline (unchanged logic)
+# Scraping pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 
 def browser_fetch(url: str, wait_ms: int, cookie: str,
@@ -73,16 +124,33 @@ def browser_fetch(url: str, wait_ms: int, cookie: str,
     log("[Browser] Launching Chromium …")
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1280, "height": 900},
-            locale="en-US",
+        # A couple of flags that reduce obvious "this is automation" signals.
+        browser = pw.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+            ],
         )
+
+        ua = random.choice(USER_AGENTS)
+        viewport = random.choice(VIEWPORTS)
+
+        ctx = browser.new_context(
+            user_agent=ua,
+            viewport=viewport,
+            locale="en-US",
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
+
+        # Apply stealth patches to every page created in this context.
+        if HAS_STEALTH:
+            log("[Browser] Applying playwright-stealth patches …")
+        else:
+            log("[Browser] playwright-stealth not installed — using built-in "
+                "fallback patches (pip install playwright-stealth for more).")
+        ctx.add_init_script(STEALTH_JS)
 
         if cookie.strip():
             parsed = urlparse(url)
@@ -103,6 +171,9 @@ def browser_fetch(url: str, wait_ms: int, cookie: str,
                 log(f"[Browser] Injected {len(cookies)} cookie(s).")
 
         page = ctx.new_page()
+        if HAS_STEALTH:
+            stealth_sync(page)
+
         log(f"[Browser] Navigating to {url} …")
         page.goto(url, wait_until="domcontentloaded", timeout=30_000)
 
@@ -110,11 +181,16 @@ def browser_fetch(url: str, wait_ms: int, cookie: str,
             log("[Browser] Scrolling page to trigger lazy-loaded content …")
             for _ in range(4):
                 page.evaluate("window.scrollBy(0, document.body.scrollHeight / 4)")
-                page.wait_for_timeout(500)
+                # Randomized pause between scrolls instead of a fixed
+                # interval — looks less like a scripted loop.
+                page.wait_for_timeout(random.randint(350, 750))
             page.evaluate("window.scrollTo(0, 0)")
 
-        log(f"[Browser] Waiting {wait_ms} ms for JavaScript to settle …")
-        page.wait_for_timeout(wait_ms)
+        # Randomize the settle wait a bit around the requested value so
+        # timing isn't perfectly uniform across runs.
+        jittered_wait = max(200, int(wait_ms * random.uniform(0.85, 1.15)))
+        log(f"[Browser] Waiting ~{jittered_wait} ms for JavaScript to settle …")
+        page.wait_for_timeout(jittered_wait)
 
         html  = page.content()
         title = page.title()
@@ -298,7 +374,7 @@ LABEL_F   = ("Segoe UI", 9)
 class ScraperApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Modern Web Scraper")
+        self.title("Modern Web Scraper — Playwright Edition")
         self.geometry("1160x820")
         self.minsize(940, 660)
         self.configure(bg=BG)
@@ -465,9 +541,11 @@ class ScraperApp(tk.Tk):
         ttk.Checkbutton(wait_row, text="Auto-scroll (triggers lazy images/comments)",
                         variable=self.scroll_var).pack(side="left")
 
-        tk.Label(opt,
-                 text="Tip: leave selectors blank for auto-detection. Increase JS wait for slow React/Vue SPAs.",
-                 bg=CARD, fg=FG, font=("Segoe UI", 8)).grid(
+        tip_text = ("Tip: leave selectors blank for auto-detection. Increase JS wait for slow "
+                     "React/Vue SPAs. Stealth patches (UA/viewport rotation, fingerprint "
+                     "hiding) are applied automatically on every run.")
+        tk.Label(opt, text=tip_text, bg=CARD, fg=FG, font=("Segoe UI", 8),
+                 wraplength=1000, justify="left").grid(
             row=4, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
         # ── Progress ────────────────────────────────────────────
