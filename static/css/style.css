@@ -332,7 +332,8 @@ body {
 
 .field input[type="text"],
 .field input[type="password"],
-.field input[type="number"] {
+.field input[type="number"],
+.field select {
   width: 100%;
   padding: 10px 12px;
   font-size: 0.88rem;
@@ -345,7 +346,8 @@ body {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }

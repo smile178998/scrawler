@@ -13,13 +13,11 @@ const statusText = $("#status-text");
 const optionsToggle = $("#options-toggle");
 const optionsBody = $("#options-body");
 
-// ── Options toggle ────────────────────────────────────────────
 optionsToggle.addEventListener("click", () => {
   const open = optionsBody.classList.toggle("open");
   optionsToggle.setAttribute("aria-expanded", open);
 });
 
-// ── Tabs ──────────────────────────────────────────────────────
 $$(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     $$(".tab").forEach((t) => t.classList.remove("active"));
@@ -29,16 +27,55 @@ $$(".tab").forEach((tab) => {
   });
 });
 
-// ── Scrape ────────────────────────────────────────────────────
 scrapeBtn.addEventListener("click", startScrape);
 urlInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") startScrape();
 });
 
+function clamp(value, min, max, fallback) {
+  const num = Number.parseInt(value, 10);
+  if (Number.isNaN(num)) return fallback;
+  return Math.min(max, Math.max(min, num));
+}
+
+function buildRequestBody() {
+  return {
+    url: urlInput.value.trim(),
+    text_selector: $("#text-sel").value.trim(),
+    comment_selector: $("#comment-sel").value.trim(),
+    cookie: $("#cookie").value.trim(),
+    proxy: $("#proxy").value.trim(),
+    wait_ms: clamp($("#wait-ms").value, 500, 30000, 3500),
+    scroll: $("#scroll").checked,
+    use_chrome: $("#use-chrome").checked,
+    headless: $("#headless-mode").value,
+    max_retries: clamp($("#max-retries").value, 0, 4, 2),
+    simulate_human: $("#simulate-human").checked,
+    block_resources: $("#block-resources").checked,
+  };
+}
+
+function formatApiError(payload) {
+  if (Array.isArray(payload.details) && payload.details.length) {
+    return payload.details.join("; ");
+  }
+  return payload.error || payload.detail || "Request failed";
+}
+
+function processSseLine(line, onEvent) {
+  if (!line.startsWith("data: ")) return;
+  try {
+    onEvent(JSON.parse(line.slice(6)));
+  } catch (_) {
+    /* ignore malformed chunks */
+  }
+}
+
 async function startScrape() {
   const url = urlInput.value.trim();
   if (!url) {
     urlInput.focus();
+    setStatus("Please enter a target URL");
     return;
   }
   if (isRunning) return;
@@ -47,15 +84,9 @@ async function startScrape() {
   setBusy(true);
   clearResults(false);
   appendLog(`▶  Target: ${url}\n\n`);
+  switchToTab("log");
 
-  const body = {
-    url,
-    text_selector: $("#text-sel").value.trim(),
-    comment_selector: $("#comment-sel").value.trim(),
-    cookie: $("#cookie").value.trim(),
-    wait_ms: parseInt($("#wait-ms").value, 10) || 2500,
-    scroll: $("#scroll").checked,
-  };
+  const body = buildRequestBody();
 
   try {
     const resp = await fetch("/api/scrape", {
@@ -63,6 +94,11 @@ async function startScrape() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+
+    if (!resp.ok) {
+      const payload = await resp.json().catch(() => ({}));
+      throw new Error(formatApiError(payload));
+    }
 
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -74,15 +110,15 @@ async function startScrape() {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
-      buffer = lines.pop();
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const evt = JSON.parse(line.slice(6));
-          handleEvent(evt);
-        } catch (_) { /* skip malformed */ }
+        processSseLine(line, handleEvent);
       }
+    }
+
+    if (buffer.trim()) {
+      processSseLine(buffer.trim(), handleEvent);
     }
   } catch (err) {
     appendLog(`\n❌  ${err.message}\n`, "err");
@@ -96,7 +132,7 @@ async function startScrape() {
 function handleEvent(evt) {
   const { type, data } = evt;
   if (type === "log") {
-    appendLog(data + "\n");
+    appendLog(`${data}\n`);
     setStatus(data.slice(-80));
   } else if (type === "done") {
     currentResult = data;
@@ -105,22 +141,26 @@ function handleEvent(evt) {
     $("#save-txt").disabled = false;
     $("#save-json").disabled = false;
     appendLog(
-      `\n✅ Summary\n` +
-      `   Paragraphs : ${data.text_paragraphs.length}\n` +
-      `   Comments   : ${data.comments.length}\n` +
-      `   Videos     : ${data.videos.length}\n` +
-      `   Images     : ${data.images.length}\n` +
-      `   Meta tags  : ${Object.keys(data.meta).length}\n`,
+      `\n✅  Summary\n` +
+        `   Paragraphs : ${data.text_paragraphs.length}\n` +
+        `   Comments   : ${data.comments.length}\n` +
+        `   Videos     : ${data.videos.length}\n` +
+        `   Images     : ${data.images.length}\n` +
+        `   Meta tags  : ${Object.keys(data.meta).length}\n`,
       "ok"
     );
-    $$(".tab")[0].click();
+    switchToTab("text");
   } else if (type === "error") {
     appendLog(`\n❌  ${data}\n`, "err");
     setStatus(`❌  ${data}`);
   }
 }
 
-// ── Render ────────────────────────────────────────────────────
+function switchToTab(name) {
+  const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+  if (tab) tab.click();
+}
+
 function renderResults(r) {
   const emptyText = $("#empty-text");
   const textEl = $("#content-text");
@@ -128,7 +168,10 @@ function renderResults(r) {
   if (r.text_paragraphs.length) {
     emptyText.classList.add("hidden");
     textEl.innerHTML = r.text_paragraphs
-      .map((p, i) => `<div class="content-item"><span class="idx">#${i + 1}</span><div>${esc(p)}</div></div>`)
+      .map(
+        (p, i) =>
+          `<div class="content-item"><span class="idx">#${i + 1}</span><div>${esc(p)}</div></div>`
+      )
       .join("");
   } else {
     emptyText.classList.remove("hidden");
@@ -137,32 +180,63 @@ function renderResults(r) {
   $("#count-text").textContent = r.text_paragraphs.length;
 
   $("#content-comments").innerHTML = r.comments.length
-    ? r.comments.map((c, i) => `<div class="comment-item"><strong>#${i + 1}</strong> ${esc(c)}</div>`).join("")
+    ? r.comments
+        .map(
+          (c, i) =>
+            `<div class="comment-item"><strong>#${i + 1}</strong> ${esc(c)}</div>`
+        )
+        .join("")
     : `<div class="empty-state"><p>No comments found. Try adding a comment selector.</p></div>`;
   $("#count-comments").textContent = r.comments.length;
 
   $("#content-videos").innerHTML = r.videos.length
-    ? r.videos.map((v, i) => `<div class="link-item"><span class="idx">${i + 1}</span><a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a></div>`).join("")
+    ? r.videos
+        .map(
+          (v, i) =>
+            `<div class="link-item"><span class="idx">${i + 1}</span><a href="${escAttr(v)}" target="_blank" rel="noopener">${esc(v)}</a></div>`
+        )
+        .join("")
     : `<div class="empty-state"><p>No video links found.</p></div>`;
   $("#count-videos").textContent = r.videos.length;
 
   $("#content-images").innerHTML = r.images.length
-    ? r.images.map((img, i) =>
-        `<div class="image-card" onclick="window.open('${esc(img)}','_blank')">
-          <img src="${esc(img)}" alt="Image ${i + 1}" loading="lazy" onerror="this.parentElement.style.display='none'" />
-          <span class="img-idx">${i + 1}</span>
-        </div>`
-      ).join("")
+    ? r.images
+        .map(
+          (img, i) =>
+            `<div class="image-card" data-url="${escAttr(img)}">
+              <img src="${escAttr(img)}" alt="Image ${i + 1}" loading="lazy" onerror="this.parentElement.style.display='none'" />
+              <span class="img-idx">${i + 1}</span>
+            </div>`
+        )
+        .join("")
     : `<div class="empty-state"><p>No images found.</p></div>`;
   $("#count-images").textContent = r.images.length;
 
-  $("#content-meta").textContent = JSON.stringify(r, null, 2);
+  $("#content-images").querySelectorAll(".image-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      window.open(card.dataset.url, "_blank", "noopener");
+    });
+  });
+
+  const metaPreview = {
+    url: r.url,
+    title: r.title,
+    text_paragraphs: r.text_paragraphs,
+    comments: r.comments,
+    videos: r.videos,
+    images: r.images,
+    meta: r.meta,
+  };
+  $("#content-meta").textContent = JSON.stringify(metaPreview, null, 2);
 }
 
-// ── Export ────────────────────────────────────────────────────
 $("#save-json").addEventListener("click", () => {
   if (!currentResult) return;
-  download("scrape_result.json", JSON.stringify(currentResult, null, 2), "application/json");
+  download(
+    "scrape_result.json",
+    JSON.stringify(currentResult, null, 2),
+    "application/json"
+  );
 });
 
 $("#save-txt").addEventListener("click", () => {
@@ -178,7 +252,7 @@ $("#save-txt").addEventListener("click", () => {
 });
 
 function download(filename, content, mime) {
-  const blob = new Blob([content], { type: mime + ";charset=utf-8" });
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = filename;
@@ -187,11 +261,16 @@ function download(filename, content, mime) {
   setStatus(`Saved → ${filename}`);
 }
 
-// ── Clear ─────────────────────────────────────────────────────
 $("#clear-btn").addEventListener("click", () => clearResults(true));
 
-function clearResults(confirm) {
-  if (confirm && currentResult && !window.confirm("Are you sure you want to clear all results?")) return;
+function clearResults(confirmAction) {
+  if (
+    confirmAction &&
+    currentResult &&
+    !window.confirm("Are you sure you want to clear all results?")
+  ) {
+    return;
+  }
   currentResult = null;
   $("#content-text").innerHTML = "";
   $("#content-comments").innerHTML = "";
@@ -208,7 +287,6 @@ function clearResults(confirm) {
   setStatus("Ready");
 }
 
-// ── Helpers ───────────────────────────────────────────────────
 function setBusy(busy) {
   scrapeBtn.disabled = busy;
   progressBar.classList.toggle("hidden", !busy);
@@ -230,13 +308,16 @@ function appendLog(text, cls) {
   log.scrollTop = log.scrollHeight;
 }
 
-function esc(s) {
+function esc(text) {
   const d = document.createElement("div");
-  d.textContent = s;
+  d.textContent = text;
   return d.innerHTML;
 }
 
-// Spin animation for loading icon
+function escAttr(text) {
+  return esc(text).replace(/"/g, "&quot;");
+}
+
 const style = document.createElement("style");
 style.textContent = `@keyframes spin { to { transform: rotate(360deg); } }`;
 document.head.appendChild(style);

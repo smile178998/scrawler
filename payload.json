@@ -1,1 +1,14 @@
-{"url": "https://example.com", "text_selector": "", "comment_selector": "", "cookie": "", "wait_ms": 2500, "scroll": true}
+{
+  "url": "https://example.com",
+  "text_selector": "",
+  "comment_selector": "",
+  "cookie": "",
+  "proxy": "",
+  "wait_ms": 3500,
+  "scroll": true,
+  "use_chrome": true,
+  "headless": "auto",
+  "max_retries": 2,
+  "simulate_human": true,
+  "block_resources": false
+}

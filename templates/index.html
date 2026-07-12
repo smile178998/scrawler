@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -23,18 +23,17 @@
         </div>
         <div>
           <h1>Modern Web Scraper</h1>
-          <p class="subtitle">Playwright real-browser engine · supports JS / SPA / lazy-loading</p>
+          <p class="subtitle">Playwright real-browser engine · anti-detection · JS / SPA / lazy-loading</p>
         </div>
       </div>
       <div class="header-badge">
         <span class="pulse-dot"></span>
-        Chromium Ready
+        Engine Ready
       </div>
     </div>
   </header>
 
   <main class="container">
-    <!-- URL Input -->
     <section class="card url-card">
       <label class="field-label" for="url-input">Target URL</label>
       <div class="url-row">
@@ -55,7 +54,6 @@
       </div>
     </section>
 
-    <!-- Options -->
     <section class="card options-card">
       <button class="options-toggle" id="options-toggle" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -76,11 +74,27 @@
           </div>
           <div class="field field-full">
             <label for="cookie">Cookie (optional)</label>
-            <input id="cookie" type="password" placeholder="key1=value1; key2=value2" />
+            <input id="cookie" type="password" placeholder="key1=value1; key2=value2" autocomplete="off" />
+          </div>
+          <div class="field field-full">
+            <label for="proxy">Proxy (optional)</label>
+            <input id="proxy" type="text" placeholder="http://127.0.0.1:7890 or socks5://user:pass@host:port" />
           </div>
           <div class="field">
             <label for="wait-ms">JS wait (ms)</label>
-            <input id="wait-ms" type="number" value="2500" min="500" max="12000" step="500" />
+            <input id="wait-ms" type="number" value="3500" min="500" max="30000" step="500" />
+          </div>
+          <div class="field">
+            <label for="headless-mode">Browser mode</label>
+            <select id="headless-mode">
+              <option value="auto" selected>Auto (headless → visible fallback)</option>
+              <option value="hidden">Headless only</option>
+              <option value="visible">Visible browser (strongest evasion)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="max-retries">Max retries</label>
+            <input id="max-retries" type="number" value="2" min="0" max="4" step="1" />
           </div>
           <div class="field field-check">
             <label class="checkbox-label">
@@ -89,12 +103,32 @@
               Auto-scroll (trigger lazy-loaded content)
             </label>
           </div>
+          <div class="field field-check">
+            <label class="checkbox-label">
+              <input id="use-chrome" type="checkbox" checked />
+              <span class="checkmark"></span>
+              Use system Chrome (better fingerprint)
+            </label>
+          </div>
+          <div class="field field-check">
+            <label class="checkbox-label">
+              <input id="simulate-human" type="checkbox" checked />
+              <span class="checkmark"></span>
+              Simulate human behavior (mouse / scroll)
+            </label>
+          </div>
+          <div class="field field-check">
+            <label class="checkbox-label">
+              <input id="block-resources" type="checkbox" />
+              <span class="checkmark"></span>
+              Block images/fonts (faster, may trigger detection)
+            </label>
+          </div>
         </div>
-        <p class="tip">Tip: Leave selectors empty to auto-detect the content area. For slow React/Vue SPAs, increase the JS wait time. Anti-detection patches (UA/viewport rotation, fingerprint hiding) are applied automatically each run.</p>
+        <p class="tip">Tip: For Cloudflare / WAF protected sites, use <strong>Auto</strong> or <strong>Visible</strong> mode with system Chrome enabled. Add a proxy if IP is blocked. Increase JS wait for heavy SPAs. CAPTCHA still requires manual solving in visible mode.</p>
       </div>
     </section>
 
-    <!-- Results -->
     <section class="card results-card">
       <div class="results-header">
         <div class="tabs" role="tablist">
@@ -147,7 +181,7 @@
         <div class="tab-panel active" id="panel-text" role="tabpanel">
           <div class="empty-state" id="empty-text">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <p>Enter a URL and click 'Start Scrape'</p>
+            <p>Enter a URL and click "Start Scrape"</p>
           </div>
           <div class="content-list" id="content-text"></div>
         </div>
