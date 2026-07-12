@@ -23,8 +23,16 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 - Auto-detect body text + optional CSS selector override
 - Heuristic comment extraction + optional CSS selector override
 - Video and image link extraction (including lazy-load attributes like `data-src`)
+- Smart image filtering — skips icons, UI sprites, and junk thumbnails
 - Metadata extraction from `<meta>` tags
 - Export results to TXT or JSON
+
+### Platform support: Bilibili
+- Auto-detects `bilibili.com` video pages
+- Extracts title, description, UP owner, stats (views, likes, coins, etc.)
+- Parses `__INITIAL_STATE__` and `__playinfo__` for **DASH video/audio stream URLs**
+- Curated images only: cover, UP avatar, first-frame preview (no recommendation clutter)
+- Partial comment extraction; full comments require login Cookie
 
 ### Smart auto-selector
 - **Heuristic DOM scoring** — finds main content and comment blocks without manual CSS selectors
@@ -53,6 +61,8 @@ spaider_crawler/
 ├── app.py              # FastAPI web server + SSE API
 ├── scraper_core.py     # Playwright pipeline + content parsing
 ├── selector_engine.py  # Smart CSS selector discovery (heuristic + AI)
+├── bilibili_parser.py  # Bilibili video metadata + stream extraction
+├── image_utils.py      # Image URL normalization and junk filtering
 ├── requirements.txt
 ├── payload.json        # Example API request body
 ├── demo.gif            # Usage demo animation for README
@@ -134,6 +144,24 @@ Or run with uvicorn directly:
 python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+### Example: scrape a Bilibili video
+
+```
+https://www.bilibili.com/video/BV1yk7X6KEz4
+```
+
+Recommended settings:
+
+| Option | Value |
+|--------|-------|
+| JS wait | `5000–8000` ms |
+| Auto-scroll | On |
+| Use system Chrome | On |
+| Smart auto-selector | Optional (Bilibili uses its own parser) |
+| Cookie | Paste Bilibili login cookies for full comments |
+
+Results appear in **Text**, **Videos**, **Images**, and **Metadata** (`bilibili` object).
+
 ---
 
 ## Web UI options
@@ -153,9 +181,11 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 | Enable AI fallback | Call LLM when heuristics fail (requires API key) |
 | AI API key / base URL / model | Override env vars; supports OpenAI-compatible providers |
 
-**Recommended for protected sites:** Browser mode = **Auto** or **Visible**, enable **Use system Chrome**, add a proxy if IP is blocked.
+**Protected sites:** Browser mode = **Auto** or **Visible**, enable **Use system Chrome**, add a proxy if IP is blocked.
 
-**Recommended for unknown page layouts:** Leave CSS selectors empty, enable **Smart auto-selector**. Add an API key for hard pages.
+**Unknown layouts:** Leave CSS selectors empty, enable **Smart auto-selector**. Add an API key for hard pages.
+
+**Bilibili videos:** Leave selectors empty; the Bilibili parser runs automatically. Add Cookie for full comments.
 
 ---
 
@@ -176,6 +206,8 @@ HTML → DOM scoring → CSS selector generation → validate → re-extract
 | `hybrid` | Heuristic found partial matches; AI refined the result |
 
 Discovered selectors appear in the **Selectors** tab and in the API response under `discovered_selectors` / `applied_selectors`.
+
+> **Note:** Bilibili URLs bypass the generic auto-selector and use `bilibili_parser.py` instead.
 
 ---
 
@@ -260,14 +292,18 @@ Starts a scrape job. Returns a **Server-Sent Events (SSE)** stream.
 import json
 import urllib.request
 
-body = json.dumps({"url": "https://example.com", "headless": "hidden"}).encode()
+body = json.dumps({
+    "url": "https://www.bilibili.com/video/BV1yk7X6KEz4",
+    "wait_ms": 6000,
+    "use_chrome": True,
+}).encode()
 req = urllib.request.Request(
     "http://127.0.0.1:8000/api/scrape",
     data=body,
     headers={"Content-Type": "application/json"},
     method="POST",
 )
-with urllib.request.urlopen(req, timeout=120) as resp:
+with urllib.request.urlopen(req, timeout=180) as resp:
     for line in resp.read().decode().splitlines():
         if line.startswith("data: "):
             print(line[6:])
@@ -292,23 +328,31 @@ After a successful scrape, the `done` event contains:
 
 ```json
 {
-  "url": "https://example.com",
-  "title": "Example Domain",
-  "text_paragraphs": ["Example Domain This domain is for use in documentation examples..."],
-  "comments": [],
-  "videos": [],
-  "images": [],
-  "meta": { "viewport": "width=device-width, initial-scale=1" },
-  "discovered_selectors": {
-    "text_selector": "article.main-content",
-    "comment_selector": "div.comments-section .comment-item",
-    "method": "heuristic",
-    "confidence": 0.85,
-    "reasoning": ""
+  "url": "https://www.bilibili.com/video/BV1yk7X6KEz4",
+  "title": "Video title",
+  "platform": "bilibili",
+  "text_paragraphs": ["播放 5,574,174 · 点赞 182,118 · ...", "UP主: ...", "Description..."],
+  "comments": ["user: comment text"],
+  "videos": ["https://...m4s?..."],
+  "images": [
+    "https://i2.hdslb.com/bfs/archive/cover.jpg",
+    "https://i1.hdslb.com/bfs/face/avatar.jpg"
+  ],
+  "meta": {
+    "bilibili_bvid": "BV1yk7X6KEz4",
+    "bilibili_aid": "116686023891513",
+    "bilibili_cid": "38829687897"
   },
-  "applied_selectors": {
-    "text_selector": "article.main-content",
-    "comment_selector": "div.comments-section .comment-item"
+  "bilibili": {
+    "bvid": "BV1yk7X6KEz4",
+    "aid": 116686023891513,
+    "cid": 38829687897,
+    "title": "...",
+    "description": "...",
+    "owner": { "name": "...", "face": "..." },
+    "stat": { "view": 5574174, "like": 182118, "reply": 1791 },
+    "video_streams": [{ "url": "...", "width": 1920, "height": 1080 }],
+    "audio_streams": [{ "url": "..." }]
   }
 }
 ```
@@ -346,6 +390,10 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 | Wrong content extracted | Leave selectors empty; enable **Smart auto-selector** |
 | AI selector not triggered | Set `OPENAI_API_KEY` in `.env` or paste key in UI |
 | AI request fails | Check `ai_base_url` / `ai_model`; verify provider compatibility |
+| Bilibili: too many junk images | Fixed in latest version — only cover/avatar/first-frame kept |
+| Bilibili: few or no comments | Paste login Cookie (`SESSDATA`, `bili_jct`) in Advanced Options |
+| Bilibili: video URLs expire | CDN links are signed and time-limited; download soon after scrape |
+| Bilibili: `.m4s` streams | DASH segments — merge with ffmpeg to get a full MP4 file |
 
 ---
 
@@ -354,6 +402,7 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 - Only scrape content you are authorized to access. Respect `robots.txt` and website terms of service.
 - This tool is for learning and legitimate research — it cannot bypass all CAPTCHAs or commercial WAF systems.
 - Use the `cookie` option only for your own session state; never use others' credentials.
+- Bilibili video streams may be protected by copyright — use extracted data responsibly.
 
 ---
 

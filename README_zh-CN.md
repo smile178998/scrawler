@@ -23,8 +23,16 @@
 - 自动识别正文 + 可选 CSS 选择器覆盖
 - 启发式评论提取 + 可选 CSS 选择器覆盖
 - 视频与图片链接提取（支持 `data-src` 等懒加载属性）
+- 智能图片过滤 — 自动跳过图标、UI 资源和无效缩略图
 - 从 `<meta>` 标签提取元数据
 - 导出结果为 TXT 或 JSON
+
+### 平台支持：哔哩哔哩 (Bilibili)
+- 自动识别 `bilibili.com` 视频页面
+- 提取标题、简介、UP 主、播放量/点赞/投币等统计数据
+- 解析 `__INITIAL_STATE__` 和 `__playinfo__` 获取 **DASH 视频/音频流地址**
+- 精选图片：仅保留封面、UP 头像、首帧预览（过滤推荐区缩略图）
+- 支持部分评论抓取；完整评论需登录 Cookie
 
 ### 智能自动选择器
 - **启发式 DOM 评分** — 无需手动填写 CSS 选择器即可定位正文与评论区域
@@ -53,6 +61,8 @@ spaider_crawler/
 ├── app.py              # FastAPI Web 服务 + SSE API
 ├── scraper_core.py     # Playwright 管道 + 内容解析
 ├── selector_engine.py  # 智能 CSS 选择器发现（启发式 + AI）
+├── bilibili_parser.py  # B 站视频元数据与流媒体提取
+├── image_utils.py      # 图片 URL 规范化与垃圾过滤
 ├── requirements.txt
 ├── payload.json        # API 请求示例
 ├── demo.gif            # README 使用演示动图
@@ -134,6 +144,24 @@ python app.py
 python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+### 示例：抓取 B 站视频
+
+```
+https://www.bilibili.com/video/BV1yk7X6KEz4
+```
+
+推荐设置：
+
+| 选项 | 建议值 |
+|------|--------|
+| JS wait | `5000–8000` ms |
+| Auto-scroll | 开启 |
+| Use system Chrome | 开启 |
+| Smart auto-selector | 可选（B 站使用专用解析器） |
+| Cookie | 粘贴 B 站登录 Cookie 以抓取完整评论 |
+
+结果可在 **Text**、**Videos**、**Images** 和 **Metadata**（`bilibili` 字段）中查看。
+
 ---
 
 ## Web 界面选项
@@ -157,6 +185,8 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 
 **未知页面结构推荐：** CSS 选择器留空，启用 **Smart auto-selector**；复杂页面配置 API Key。
 
+**B 站视频：** 选择器留空即可，自动启用 B 站专用解析器；完整评论需填写 Cookie。
+
 ---
 
 ## 智能自动选择器
@@ -176,6 +206,8 @@ HTML → DOM 评分 → 生成 CSS 选择器 → 验证 → 重新提取
 | `hybrid` | 启发式部分命中，AI 进一步优化 |
 
 发现的选择器显示在 **Selectors** 选项卡，API 响应中位于 `discovered_selectors` / `applied_selectors` 字段。
+
+> **说明：** B 站链接会跳过通用自动选择器，改用 `bilibili_parser.py` 专用解析。
 
 ---
 
@@ -260,14 +292,18 @@ HTML → DOM 评分 → 生成 CSS 选择器 → 验证 → 重新提取
 import json
 import urllib.request
 
-body = json.dumps({"url": "https://example.com", "headless": "hidden"}).encode()
+body = json.dumps({
+    "url": "https://www.bilibili.com/video/BV1yk7X6KEz4",
+    "wait_ms": 6000,
+    "use_chrome": True,
+}).encode()
 req = urllib.request.Request(
     "http://127.0.0.1:8000/api/scrape",
     data=body,
     headers={"Content-Type": "application/json"},
     method="POST",
 )
-with urllib.request.urlopen(req, timeout=120) as resp:
+with urllib.request.urlopen(req, timeout=180) as resp:
     for line in resp.read().decode().splitlines():
         if line.startswith("data: "):
             print(line[6:])
@@ -292,23 +328,31 @@ Invoke-WebRequest `
 
 ```json
 {
-  "url": "https://example.com",
-  "title": "Example Domain",
-  "text_paragraphs": ["Example Domain This domain is for use in documentation examples..."],
-  "comments": [],
-  "videos": [],
-  "images": [],
-  "meta": { "viewport": "width=device-width, initial-scale=1" },
-  "discovered_selectors": {
-    "text_selector": "article.main-content",
-    "comment_selector": "div.comments-section .comment-item",
-    "method": "heuristic",
-    "confidence": 0.85,
-    "reasoning": ""
+  "url": "https://www.bilibili.com/video/BV1yk7X6KEz4",
+  "title": "视频标题",
+  "platform": "bilibili",
+  "text_paragraphs": ["播放 5,574,174 · 点赞 182,118 · ...", "UP主: ...", "简介..."],
+  "comments": ["用户: 评论内容"],
+  "videos": ["https://...m4s?..."],
+  "images": [
+    "https://i2.hdslb.com/bfs/archive/cover.jpg",
+    "https://i1.hdslb.com/bfs/face/avatar.jpg"
+  ],
+  "meta": {
+    "bilibili_bvid": "BV1yk7X6KEz4",
+    "bilibili_aid": "116686023891513",
+    "bilibili_cid": "38829687897"
   },
-  "applied_selectors": {
-    "text_selector": "article.main-content",
-    "comment_selector": "div.comments-section .comment-item"
+  "bilibili": {
+    "bvid": "BV1yk7X6KEz4",
+    "aid": 116686023891513,
+    "cid": 38829687897,
+    "title": "...",
+    "description": "...",
+    "owner": { "name": "...", "face": "..." },
+    "stat": { "view": 5574174, "like": 182118, "reply": 1791 },
+    "video_streams": [{ "url": "...", "width": 1920, "height": 1080 }],
+    "audio_streams": [{ "url": "..." }]
   }
 }
 ```
@@ -346,6 +390,10 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 | 提取内容不正确 | 选择器留空；启用 **Smart auto-selector** |
 | AI 选择器未触发 | 在 `.env` 设置 `OPENAI_API_KEY` 或在界面填入 Key |
 | AI 请求失败 | 检查 `ai_base_url` / `ai_model`；确认服务商兼容性 |
+| B 站：图片数量异常/无法加载 | 最新版已修复 — 仅保留封面/头像/首帧 |
+| B 站：评论很少或为空 | 在高级选项粘贴登录 Cookie（`SESSDATA`、`bili_jct`） |
+| B 站：视频链接过期 | CDN 链接带签名有时效，请尽快下载 |
+| B 站：`.m4s` 分片 | DASH 流媒体分片，需用 ffmpeg 合并为完整 MP4 |
 
 ---
 
@@ -354,6 +402,7 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 - 仅抓取你有权访问的内容，遵守 `robots.txt` 和网站服务条款。
 - 本工具仅供学习与合法研究，无法绕过所有 CAPTCHA 或商业 WAF。
 - `cookie` 选项仅用于你自己的会话，切勿使用他人凭证。
+- B 站视频流可能受版权保护，请合法使用抓取结果。
 
 ---
 
