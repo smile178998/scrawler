@@ -5,11 +5,13 @@ This repository contains a Playwright-powered web scraper with a web user interf
 
 The core pipeline (`scraper_core.py`) launches a real Chromium browser (via Playwright), renders the page, and extracts structured data (body text, comments, video links, images, and meta tags).
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![License](https://img.shields.io/badge/license-MIT-green)
+
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
+
+![Screenshot](image.png)
+
 
 ## Features
 
@@ -62,6 +64,40 @@ python -m playwright install chromium
 Notes:
 - `playwright-stealth` is optional — the code falls back to a small built-in patch when it's not available.
 - On Linux, you may need system packages for Chromium to run (fonts, libgtk, etc.).
+
+---
+
+## Quickstart
+
+After installing requirements and Playwright binaries, start the web UI:
+
+```bash
+python app.py
+# or
+python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Open your browser at `http://127.0.0.1:8000/` and enter a URL to scrape.
+
+---
+
+## Optional: Docker (experimental)
+
+You can run the web UI inside a container. This repo does not include an official Dockerfile, but a minimal example:
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY . /app
+RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m playwright install chromium
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Notes for Docker:
+- Use a non-root user and ensure required system libraries are installed for Chromium (fonts, GTK, etc.).
+- Containers running Playwright may need extra flags or capabilities depending on the host environment.
 
 ---
 
