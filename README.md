@@ -126,13 +126,6 @@ Or save the response stream to a file:
 ```powershell
 Invoke-WebRequest -Uri http://127.0.0.1:8000/api/scrape -Method Post -Body (Get-Content payload.json -Raw) -ContentType "application/json" -OutFile sse_response.txt
 ```
-
----
-
-## Desktop GUI Removed
-
-The original Tkinter-based desktop GUI (`spider_gui.py`) has been removed from this repository. Use the FastAPI web UI (`app.py`) instead by following the "Run the Web UI (FastAPI)" instructions above.
-
 ---
 
 ## API Output
