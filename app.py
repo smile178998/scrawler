@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from scraper_core import run_pipeline
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Modern Web Scraper", version="1.1.0")
@@ -37,6 +43,11 @@ class ScrapeRequest(BaseModel):
     max_retries: int = Field(default=2, ge=0, le=4)
     simulate_human: bool = True
     block_resources: bool = False
+    auto_selector: bool = True
+    auto_selector_ai: bool = True
+    ai_api_key: str = ""
+    ai_base_url: str = ""
+    ai_model: str = ""
 
     @field_validator("url")
     @classmethod
@@ -103,6 +114,11 @@ async def scrape(req: ScrapeRequest):
             max_retries=req.max_retries,
             simulate_human=req.simulate_human,
             block_resources=req.block_resources,
+            auto_selector=req.auto_selector,
+            auto_selector_ai=req.auto_selector_ai,
+            ai_api_key=req.ai_api_key.strip(),
+            ai_base_url=req.ai_base_url.strip(),
+            ai_model=req.ai_model.strip(),
         )
 
     thread = threading.Thread(target=worker, daemon=True)

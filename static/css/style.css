@@ -686,3 +686,60 @@ body {
 .content-item, .comment-item, .link-item, .image-card {
   animation: fadeIn 0.3s ease forwards;
 }
+
+/* ── Selector panel ──────────────────────────────────────────── */
+.selector-panel { padding: 4px 0; }
+
+.selector-card {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-glow);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+}
+
+.selector-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.12);
+  align-items: start;
+}
+
+.selector-row:last-of-type { border-bottom: none; }
+
+.selector-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--dim);
+}
+
+.selector-value {
+  font-size: 0.88rem;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.selector-code {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  background: var(--card);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  word-break: break-all;
+}
+
+.selector-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+}
+
+.tip code {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  background: var(--accent-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+}

@@ -52,6 +52,11 @@ function buildRequestBody() {
     max_retries: clamp($("#max-retries").value, 0, 4, 2),
     simulate_human: $("#simulate-human").checked,
     block_resources: $("#block-resources").checked,
+    auto_selector: $("#auto-selector").checked,
+    auto_selector_ai: $("#auto-selector-ai").checked,
+    ai_api_key: $("#ai-api-key").value.trim(),
+    ai_base_url: $("#ai-base-url").value.trim(),
+    ai_model: $("#ai-model").value.trim(),
   };
 }
 
@@ -228,6 +233,48 @@ function renderResults(r) {
     meta: r.meta,
   };
   $("#content-meta").textContent = JSON.stringify(metaPreview, null, 2);
+  renderSelectors(r);
+}
+
+function renderSelectors(r) {
+  const panel = $("#content-selectors");
+  const empty = $("#empty-selectors");
+  const discovered = r.discovered_selectors;
+  const applied = r.applied_selectors;
+
+  if (!discovered && !applied) {
+    empty.classList.remove("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+
+  empty.classList.add("hidden");
+  const textSel = applied?.text_selector || discovered?.text_selector || "";
+  const commentSel = applied?.comment_selector || discovered?.comment_selector || "";
+  const method = discovered?.method || "none";
+  const confidence = discovered?.confidence ? `${(discovered.confidence * 100).toFixed(0)}%` : "—";
+  const reasoning = discovered?.reasoning || "";
+
+  panel.innerHTML = `
+    <div class="selector-card">
+      <div class="selector-row"><span class="selector-label">Method</span><span class="selector-value">${esc(method)}</span></div>
+      <div class="selector-row"><span class="selector-label">Confidence</span><span class="selector-value">${esc(confidence)}</span></div>
+      <div class="selector-row"><span class="selector-label">Text selector</span><code class="selector-code">${esc(textSel || "(none)")}</code></div>
+      <div class="selector-row"><span class="selector-label">Comment selector</span><code class="selector-code">${esc(commentSel || "(none)")}</code></div>
+      ${reasoning ? `<div class="selector-row"><span class="selector-label">AI reasoning</span><span class="selector-value">${esc(reasoning)}</span></div>` : ""}
+      <div class="selector-actions">
+        <button class="btn btn-ghost btn-sm" id="apply-selectors-btn" ${textSel || commentSel ? "" : "disabled"}>Apply to form</button>
+      </div>
+    </div>`;
+
+  const applyBtn = $("#apply-selectors-btn");
+  if (applyBtn) {
+    applyBtn.addEventListener("click", () => {
+      if (textSel) $("#text-sel").value = textSel;
+      if (commentSel) $("#comment-sel").value = commentSel;
+      setStatus("Selectors applied to Advanced Options");
+    });
+  }
 }
 
 $("#save-json").addEventListener("click", () => {
@@ -277,6 +324,8 @@ function clearResults(confirmAction) {
   $("#content-videos").innerHTML = "";
   $("#content-images").innerHTML = "";
   $("#content-meta").textContent = "";
+  $("#content-selectors").innerHTML = "";
+  $("#empty-selectors").classList.remove("hidden");
   $("#content-log").innerHTML = "";
   $("#empty-text").classList.remove("hidden");
   ["text", "comments", "videos", "images"].forEach((t) => {

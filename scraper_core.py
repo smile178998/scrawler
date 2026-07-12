@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
+from selector_engine import SelectorConfig, enhance_with_auto_selectors
 
 try:
     from playwright_stealth import Stealth
@@ -730,9 +731,24 @@ def run_pipeline(
     log_q: queue.Queue,
     **kwargs,
 ):
+    def log(msg: str):
+        log_q.put(("log", msg))
+
     try:
         raw = browser_fetch(url, wait_ms, cookie, scroll, log_q, **kwargs)
         result = parse_content(raw, text_sel, comment_sel)
+
+        selector_cfg = SelectorConfig(
+            enabled=bool(kwargs.get("auto_selector", True)),
+            use_ai=bool(kwargs.get("auto_selector_ai", True)),
+            ai_api_key=str(kwargs.get("ai_api_key", "")).strip(),
+            ai_base_url=str(kwargs.get("ai_base_url", "")).strip() or "https://api.openai.com/v1",
+            ai_model=str(kwargs.get("ai_model", "")).strip() or "gpt-4o-mini",
+        )
+        result = enhance_with_auto_selectors(
+            raw, result, text_sel, comment_sel, selector_cfg, parse_content, log
+        )
+
         log_q.put(("done", result))
     except Exception as exc:
         log_q.put(("error", str(exc)))

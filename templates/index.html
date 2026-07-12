@@ -124,8 +124,34 @@
               Block images/fonts (faster, may trigger detection)
             </label>
           </div>
+          <div class="field field-check field-full">
+            <label class="checkbox-label">
+              <input id="auto-selector" type="checkbox" checked />
+              <span class="checkmark"></span>
+              Smart auto-selector (DOM scoring + AI fallback)
+            </label>
+          </div>
+          <div class="field field-check field-full">
+            <label class="checkbox-label">
+              <input id="auto-selector-ai" type="checkbox" checked />
+              <span class="checkmark"></span>
+              Enable AI fallback when heuristics fail (requires API key)
+            </label>
+          </div>
+          <div class="field field-full">
+            <label for="ai-api-key">AI API key (optional)</label>
+            <input id="ai-api-key" type="password" placeholder="Uses OPENAI_API_KEY env var if empty" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="ai-base-url">AI base URL</label>
+            <input id="ai-base-url" type="text" placeholder="https://api.openai.com/v1" />
+          </div>
+          <div class="field">
+            <label for="ai-model">AI model</label>
+            <input id="ai-model" type="text" placeholder="gpt-4o-mini" />
+          </div>
         </div>
-        <p class="tip">Tip: For Cloudflare / WAF protected sites, use <strong>Auto</strong> or <strong>Visible</strong> mode with system Chrome enabled. Add a proxy if IP is blocked. Increase JS wait for heavy SPAs. CAPTCHA still requires manual solving in visible mode.</p>
+        <p class="tip">Tip: Leave CSS selectors empty to let the engine discover them automatically. Heuristic DOM scoring runs first; AI (OpenAI / DeepSeek / Ollama-compatible) kicks in for hard pages. Set <code>OPENAI_API_KEY</code> in your environment or paste a key above.</p>
       </div>
     </section>
 
@@ -151,6 +177,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             Images
             <span class="tab-count" id="count-images">0</span>
+          </button>
+          <button class="tab" data-tab="selectors" role="tab">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            Selectors
           </button>
           <button class="tab" data-tab="meta" role="tab">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
@@ -193,6 +223,12 @@
         </div>
         <div class="tab-panel" id="panel-images" role="tabpanel">
           <div class="image-grid" id="content-images"></div>
+        </div>
+        <div class="tab-panel" id="panel-selectors" role="tabpanel">
+          <div class="empty-state" id="empty-selectors">
+            <p>Discovered CSS selectors will appear here after a scrape.</p>
+          </div>
+          <div class="selector-panel" id="content-selectors"></div>
         </div>
         <div class="tab-panel" id="panel-meta" role="tabpanel">
           <pre class="code-block" id="content-meta"></pre>

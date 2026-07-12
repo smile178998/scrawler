@@ -10,5 +10,10 @@
   "headless": "auto",
   "max_retries": 2,
   "simulate_human": true,
-  "block_resources": false
+  "block_resources": false,
+  "auto_selector": true,
+  "auto_selector_ai": true,
+  "ai_api_key": "",
+  "ai_base_url": "",
+  "ai_model": ""
 }
