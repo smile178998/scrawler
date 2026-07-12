@@ -54,6 +54,7 @@ function buildRequestBody() {
     block_resources: $("#block-resources").checked,
     auto_selector: $("#auto-selector").checked,
     auto_selector_ai: $("#auto-selector-ai").checked,
+    download_media: $("#download-media").checked,
     ai_api_key: $("#ai-api-key").value.trim(),
     ai_base_url: $("#ai-base-url").value.trim(),
     ai_model: $("#ai-model").value.trim(),
@@ -151,7 +152,11 @@ function handleEvent(evt) {
         `   Comments   : ${data.comments.length}\n` +
         `   Videos     : ${data.videos.length}\n` +
         `   Images     : ${data.images.length}\n` +
-        `   Meta tags  : ${Object.keys(data.meta).length}\n`,
+        `   Meta tags  : ${Object.keys(data.meta).length}\n` +
+        (data.downloads
+          ? `   Downloaded : ${data.downloads.images.length} image(s), ${data.downloads.videos.length} video file(s)\n` +
+            `   Folder     : ${data.downloads.dir}\n`
+          : ""),
       "ok"
     );
     switchToTab("text");
@@ -194,27 +199,53 @@ function renderResults(r) {
     : `<div class="empty-state"><p>No comments found. Try adding a comment selector.</p></div>`;
   $("#count-comments").textContent = r.comments.length;
 
-  $("#content-videos").innerHTML = r.videos.length
-    ? r.videos
-        .map(
-          (v, i) =>
-            `<div class="link-item"><span class="idx">${i + 1}</span><a href="${escAttr(v)}" target="_blank" rel="noopener">${esc(v)}</a></div>`
-        )
-        .join("")
-    : `<div class="empty-state"><p>No video links found.</p></div>`;
-  $("#count-videos").textContent = r.videos.length;
+  const localImageMap = {};
+  (r.downloads?.images || []).forEach((item) => {
+    localImageMap[normalizeImgUrl(item.url)] = item.web_path;
+  });
 
   const displayImages = (r.images || []).map(normalizeImgUrl).filter(Boolean);
 
+  const videoHeader =
+    r.downloads?.videos?.length
+      ? `<div class="download-banner">Downloaded ${r.downloads.videos.length} file(s) to <code>${esc(r.downloads.dir)}</code></div>`
+      : "";
+
+  const downloadedItems = (r.downloads?.videos || [])
+    .map(
+      (d) =>
+        `<div class="link-item"><span class="idx">✓</span><a href="${escAttr(d.web_path)}" target="_blank" rel="noopener">${esc(d.path.split(/[/\\]/).pop())}</a> <span class="muted">(local)</span></div>`
+    )
+    .join("");
+
+  const streamItems = r.videos
+    .map((v, i) => {
+      const local = (r.downloads?.videos || []).find((d) => d.url === v);
+      if (local) return "";
+      return `<div class="link-item"><span class="idx">${i + 1}</span><a href="${escAttr(v)}" target="_blank" rel="noopener">${esc(v)}</a></div>`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  $("#content-videos").innerHTML =
+    videoHeader +
+    (downloadedItems || streamItems
+      ? downloadedItems + streamItems
+      : `<div class="empty-state"><p>No video links found.</p></div>`);
+  $("#count-videos").textContent = Math.max(
+    r.videos.length,
+    (r.downloads?.videos || []).length
+  );
+
   $("#content-images").innerHTML = displayImages.length
     ? displayImages
-        .map(
-          (img, i) =>
-            `<div class="image-card" data-url="${escAttr(img)}">
-              <img src="${escAttr(img)}" alt="Image ${i + 1}" loading="lazy" onerror="this.parentElement.style.display='none'" />
+        .map((img, i) => {
+          const src = localImageMap[img] || img;
+          return `<div class="image-card" data-url="${escAttr(src)}">
+              <img src="${escAttr(src)}" alt="Image ${i + 1}" loading="lazy" onerror="this.parentElement.style.display='none'" />
               <span class="img-idx">${i + 1}</span>
-            </div>`
-        )
+            </div>`;
+        })
         .join("")
     : `<div class="empty-state"><p>No images found.</p></div>`;
   $("#count-images").textContent = displayImages.length;
@@ -235,6 +266,7 @@ function renderResults(r) {
     images: displayImages,
     meta: r.meta,
     bilibili: r.bilibili,
+    downloads: r.downloads,
     discovered_selectors: r.discovered_selectors,
     applied_selectors: r.applied_selectors,
   };

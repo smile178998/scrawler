@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 from bilibili_parser import extract_bilibili, is_bilibili_url, merge_bilibili_result
 from image_utils import collect_images
+from media_downloader import download_media
 from selector_engine import SelectorConfig, enhance_with_auto_selectors
 
 try:
@@ -765,6 +766,10 @@ def run_pipeline(
             result = enhance_with_auto_selectors(
                 raw, result, text_sel, comment_sel, selector_cfg, parse_content, log
             )
+
+        if kwargs.get("download_media", True):
+            log("[Download] Saving images and videos to disk ...")
+            result = download_media(result, log)
 
         log_q.put(("done", result))
     except Exception as exc:

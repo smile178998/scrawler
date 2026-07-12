@@ -45,6 +45,7 @@ def main() -> int:
         simulate_human=True,
         auto_selector=False,
         auto_selector_ai=False,
+        download_media=True,
     )
 
     result = None
@@ -72,6 +73,13 @@ def main() -> int:
           f"videos={len(result.get('videos') or [])} images={len(result.get('images') or [])}")
     if bili:
         print(f"title={bili.get('title')} total_comments~{bili.get('comment_total')}")
+    dl = result.get("downloads") or {}
+    if dl:
+        print(f"downloads={dl.get('dir')}")
+        for v in dl.get("videos") or []:
+            print(f"  video: {v.get('path')}")
+        for img in dl.get("images") or []:
+            print(f"  image: {img.get('path')}")
     return 0
 
 

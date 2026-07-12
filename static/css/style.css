@@ -516,6 +516,22 @@ body {
 
 .empty-state.hidden { display: none; }
 
+.download-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  font-size: 0.85rem;
+  color: var(--text-secondary, #a1a1aa);
+  word-break: break-all;
+}
+
+.download-banner code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+}
+
 /* ── Content list ────────────────────────────────────────────── */
 .content-list { display: flex; flex-direction: column; gap: 10px; }
 

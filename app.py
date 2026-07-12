@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from scraper_core import run_pipeline
+from media_downloader import DOWNLOADS_ROOT
 
 try:
     from dotenv import load_dotenv
@@ -26,8 +27,10 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Modern Web Scraper", version="1.1.0")
+DOWNLOADS_ROOT.mkdir(parents=True, exist_ok=True)
+app = FastAPI(title="Modern Web Scraper", version="1.2.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/downloads", StaticFiles(directory=str(DOWNLOADS_ROOT)), name="downloads")
 
 
 class ScrapeRequest(BaseModel):
@@ -48,6 +51,7 @@ class ScrapeRequest(BaseModel):
     ai_api_key: str = ""
     ai_base_url: str = ""
     ai_model: str = ""
+    download_media: bool = True
 
     @field_validator("url")
     @classmethod
@@ -119,6 +123,7 @@ async def scrape(req: ScrapeRequest):
             ai_api_key=req.ai_api_key.strip(),
             ai_base_url=req.ai_base_url.strip(),
             ai_model=req.ai_model.strip(),
+            download_media=req.download_media,
         )
 
     thread = threading.Thread(target=worker, daemon=True)
