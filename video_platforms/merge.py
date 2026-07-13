@@ -13,16 +13,21 @@ def _stream_urls(payload: dict) -> list[str]:
     urls: list[str] = []
     for stream in payload.get("video_streams") or []:
         url = stream.get("url")
-        if url and url not in urls:
+        if url and url not in urls and _is_http_url(url):
             urls.append(url)
     for stream in payload.get("audio_streams") or []:
         url = stream.get("url")
-        if url and url not in urls:
+        if url and url not in urls and _is_http_url(url):
             urls.append(url)
     embed = payload.get("embed_url")
-    if embed and embed not in urls:
+    if embed and embed not in urls and _is_http_url(embed):
         urls.append(embed)
     return urls
+
+
+def _is_http_url(url: str) -> bool:
+    u = (url or "").strip().lower()
+    return u.startswith(("http://", "https://")) and not u.startswith("blob:")
 
 
 def _curated_images(platform: str, payload: dict) -> list[str]:

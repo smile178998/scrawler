@@ -4,7 +4,7 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 
 **Language / 语言：** **English** | [简体中文](README_zh-CN.md)
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey) ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey) ![Version](https://img.shields.io/badge/version-1.3.0-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
@@ -23,16 +23,29 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 - Auto-detect body text + optional CSS selector override
 - Heuristic comment extraction + optional CSS selector override
 - Video and image link extraction (including lazy-load attributes like `data-src`)
-- Smart image filtering — skips icons, UI sprites, and junk thumbnails
+- Smart image filtering — skips icons, UI sprites, recommendation thumbnails, and junk URLs
 - Metadata extraction from `<meta>` tags
 - Export results to TXT or JSON
 
-### Platform support: Bilibili
-- Auto-detects major video platforms (Bilibili, YouTube, Vimeo, TikTok, Douyin, Twitter/X, Twitch, and more)
-- Extracts title, description, UP owner, stats (views, likes, coins, etc.)
-- Parses `__INITIAL_STATE__` and `__playinfo__` for **DASH video/audio stream URLs**
-- Curated images only: cover, UP avatar, first-frame preview (no recommendation clutter)
-- Partial comment extraction; full comments require login Cookie
+### Video platforms (`video_platforms/`)
+- Auto-detects major video sites: **Bilibili**, **YouTube**, **Vimeo**, **TikTok**, **Douyin**, **Twitter/X**, **Twitch**, **Dailymotion**, **Niconico**
+- **Bilibili** — dedicated handler: `__INITIAL_STATE__`, `__playinfo__`, WBI comment pagination, DASH streams
+- **Other platforms** — generic handler via Open Graph, JSON-LD, `ytInitialPlayerResponse`, and DOM `<video>` tags
+- Unified result shape: `platform`, `platform_data`, curated images (cover / avatar / first-frame)
+- Video platform URLs bypass the generic auto-selector automatically
+
+### Media download & in-browser playback
+- **Auto-download** images and videos to local `downloads/` folder
+- Videos validated by file magic bytes — HTML error pages are rejected (no fake `.bin` / `.mp4`)
+- **ffmpeg** remux: merges Bilibili DASH (`.m4s`) into browser-playable `.mp4`
+- **Videos tab** — inline `<video>` player; click ▶ to watch locally saved files
+- `/downloads/...` served with correct `video/mp4` MIME type
+
+### Saved login (all sites)
+- **Remember login** — persistent Chrome profile in `.chrome_profile/`
+- Log in once per site in **Visible browser** mode; session reused on later scrapes
+- Works for Bilibili, YouTube, forums, and any site that needs authentication
+- Optional Cookie field overrides the saved session when needed
 
 ### Smart auto-selector
 - **Heuristic DOM scoring** — finds main content and comment blocks without manual CSS selectors
@@ -48,9 +61,10 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 - Human-like behavior simulation (mouse movement, scrolling)
 - Cloudflare / WAF challenge page detection with auto-wait
 - Multi-strategy retry: headless → extended wait → visible browser fallback
-- HTTP/SOCKS5 **proxy** support (with optional auth)
-- Cookie injection for authenticated sessions
+- Navigation retry on transient network errors; dead env proxies auto-skipped
+- HTTP/SOCKS5 **proxy** support (UI field or `SCRAPER_PROXY` / `HTTP_PROXY` env vars)
 - Configurable JS wait time and auto-scroll
+- **Port auto-selection** — if 8000 is busy, tries 8001+ automatically
 
 ---
 
@@ -58,25 +72,30 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 
 ```
 spaider_crawler/
-├── app.py              # FastAPI web server + SSE API
+├── app.py              # FastAPI web server + SSE API + /downloads media route
 ├── scraper_core.py     # Playwright pipeline + content parsing
 ├── selector_engine.py  # Smart CSS selector discovery (heuristic + AI)
+├── media_downloader.py # Auto-download images/videos; ffmpeg merge; MIME types
 ├── video_platforms/    # Multi-platform video metadata + stream extraction
+│   ├── __init__.py     # detect / extract / merge entry points
+│   ├── registry.py     # Platform URL matching and dispatch
 │   ├── bilibili.py     # Bilibili handler (WBI comments, DASH streams)
-│   ├── generic.py      # YouTube, Vimeo, TikTok, etc. via meta/JSON-LD
-│   └── merge.py        # Unified result merge
+│   ├── generic.py      # YouTube, Vimeo, TikTok, etc.
+│   └── merge.py        # Unified result merge → platform_data
 ├── image_utils.py      # Image URL normalization and junk filtering
 ├── requirements.txt
 ├── payload.json        # Example API request body
 ├── demo.gif            # Usage demo animation for README
-├── .env.example        # AI API key template (copy to .env)
+├── .env.example        # Env template (copy to .env)
 ├── templates/
 │   └── index.html      # Web UI
 ├── static/
 │   ├── css/style.css
 │   └── js/app.js
 └── scripts/
-    └── record_demo_gif.py  # Regenerate demo.gif for README
+    ├── start.ps1       # Kill stale servers, start on port 8000 (Windows)
+    ├── scrape_video.py # CLI: scrape any supported video URL → JSON
+    └── record_demo_gif.py
 ```
 
 ---
@@ -86,6 +105,7 @@ spaider_crawler/
 - Python 3.10+
 - `pip` and a writable Python environment
 - Google Chrome (optional, recommended for stronger anti-detection)
+- **ffmpeg** (optional, recommended for merging DASH streams into playable MP4)
 
 Dependencies are listed in `requirements.txt`.
 
@@ -117,7 +137,7 @@ python -m playwright install chromium
 
 > **Tip:** Install [Google Chrome](https://www.google.com/chrome/) on your system and enable **Use system Chrome** in Advanced Options for better fingerprint evasion.
 
-4. (Optional) Configure AI selector fallback — copy `.env.example` to `.env` and set your API key:
+4. (Optional) Configure environment — copy `.env.example` to `.env`:
 
 ```bash
 cp .env.example .env   # Windows: copy .env.example .env
@@ -125,21 +145,33 @@ cp .env.example .env   # Windows: copy .env.example .env
 
 ```env
 OPENAI_API_KEY=sk-your-key-here
-# DeepSeek: AI_BASE_URL=https://api.deepseek.com/v1  AI_MODEL=deepseek-chat
-# Ollama:   AI_BASE_URL=http://127.0.0.1:11434/v1   AI_MODEL=llama3.2
+
+# Optional proxy (also readable from HTTP_PROXY / HTTPS_PROXY)
+# SCRAPER_PROXY=http://127.0.0.1:7890
+
+# Optional Bilibili cookie override (saved profile is preferred)
+# BILI_COOKIE=SESSDATA=...; bili_jct=...
 ```
 
 ---
 
 ## Quickstart
 
-Start the web UI:
+**Windows (recommended):**
+
+```powershell
+.\scripts\start.ps1
+```
+
+**Or manually:**
 
 ```bash
 python app.py
 ```
 
-Open `http://127.0.0.1:8000/` in your browser, enter a URL, and click **Start Scrape**.
+Open the URL printed in the terminal (usually `http://127.0.0.1:8000/`). Confirm the header shows **v1.3.0**.
+
+Enter a URL and click **Start Scrape**.
 
 Or run with uvicorn directly:
 
@@ -147,23 +179,44 @@ Or run with uvicorn directly:
 python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### Example: scrape a Bilibili video
+### Example: Bilibili video
 
 ```
 https://www.bilibili.com/video/BV1yk7X6KEz4
 ```
 
-Recommended settings:
+| Option | Value |
+|--------|-------|
+| Remember login | On (log in once in Visible mode) |
+| JS wait | `8000` ms |
+| Auto-scroll | On |
+| Use system Chrome | On |
+| Auto-download | On |
+| Smart auto-selector | Off (auto-disabled for video platforms) |
+| Browser mode | Visible (first run / captcha) |
+
+### Example: YouTube video
+
+```
+https://www.youtube.com/watch?v=...
+```
 
 | Option | Value |
 |--------|-------|
-| JS wait | `5000–8000` ms |
-| Auto-scroll | On |
+| Remember login | On |
+| JS wait | `8000` ms |
 | Use system Chrome | On |
-| Smart auto-selector | Optional (Bilibili uses its own parser) |
-| Cookie | Paste Bilibili login cookies for full comments |
+| Visible browser | On (needed for stream URLs) |
+| Auto-download | On |
+| Proxy | Only if required in your network |
 
-Results appear in **Text**, **Videos**, **Images**, and **Metadata** (`bilibili` object).
+Results appear in **Text**, **Videos** (inline player), **Images**, and **Metadata** (`platform`, `platform_data`).
+
+### CLI scrape
+
+```bash
+python scripts/scrape_video.py "https://www.bilibili.com/video/BV1yk7X6KEz4" output.json
+```
 
 ---
 
@@ -172,23 +225,25 @@ Results appear in **Text**, **Videos**, **Images**, and **Metadata** (`bilibili`
 | Option | Description |
 |--------|-------------|
 | Text / Comment selector | CSS selectors; leave empty for auto-detection |
-| Cookie | Session cookies (`key1=val1; key2=val2`) |
-| Proxy | `http://host:port` or `socks5://user:pass@host:port` |
+| **Remember login** | Persistent `.chrome_profile/` — log in once per site in Visible mode |
+| Cookie | Optional session override (`key1=val1; key2=val2`) |
+| Proxy | `http://host:port` or `socks5://user:pass@host:port`; leave empty for direct connection |
 | JS wait (ms) | Time to wait for JavaScript after page load (500–30000) |
 | Browser mode | `Auto` / `Headless only` / `Visible browser` |
 | Max retries | Number of retry attempts with alternate strategies (0–4) |
 | Use system Chrome | Prefer installed Chrome over bundled Chromium |
 | Simulate human | Random mouse movement and scroll behavior |
 | Block resources | Skip images/fonts for speed (may trigger bot detection) |
+| **Auto-download** | Save images and videos to `downloads/`; play videos in the Videos tab |
 | Smart auto-selector | DOM scoring to discover text/comment CSS selectors automatically |
 | Enable AI fallback | Call LLM when heuristics fail (requires API key) |
 | AI API key / base URL / model | Override env vars; supports OpenAI-compatible providers |
 
-**Protected sites:** Browser mode = **Auto** or **Visible**, enable **Use system Chrome**, add a proxy if IP is blocked.
+**Protected / login sites:** Remember login + **Visible** mode + system Chrome. Add Cookie only if needed.
+
+**Video platforms:** Leave selectors empty; `video_platforms/` runs automatically. Enable Auto-download for local playback.
 
 **Unknown layouts:** Leave CSS selectors empty, enable **Smart auto-selector**. Add an API key for hard pages.
-
-**Bilibili videos:** Leave selectors empty; the Bilibili parser runs automatically. Add Cookie for full comments.
 
 ---
 
@@ -218,11 +273,19 @@ Discovered selectors appear in the **Selectors** tab and in the API response und
 
 ### `GET /api/health`
 
-Health check.
+Health check and version info.
 
 ```json
-{ "status": "ok" }
+{
+  "status": "ok",
+  "version": "1.3.0",
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile"]
+}
 ```
+
+### `GET /downloads/{path}`
+
+Serves downloaded media files with correct MIME types (e.g. `video/mp4` for playback in the browser).
 
 ### `POST /api/scrape`
 
@@ -248,7 +311,9 @@ Starts a scrape job. Returns a **Server-Sent Events (SSE)** stream.
   "auto_selector_ai": true,
   "ai_api_key": "",
   "ai_base_url": "",
-  "ai_model": ""
+  "ai_model": "",
+  "download_media": true,
+  "use_saved_profile": true
 }
 ```
 
@@ -271,14 +336,17 @@ Starts a scrape job. Returns a **Server-Sent Events (SSE)** stream.
 | `ai_api_key` | string | `""` | API key (falls back to `OPENAI_API_KEY` env) |
 | `ai_base_url` | string | `""` | API base URL (default: OpenAI) |
 | `ai_model` | string | `""` | Model name (default: `gpt-4o-mini`) |
+| `download_media` | bool | `true` | Download images/videos to `downloads/` |
+| `use_saved_profile` | bool | `true` | Use persistent `.chrome_profile/` login |
 
 **SSE events:**
 
 | Event | Description |
 |-------|-------------|
 | `log` | Progress message |
+| `ping` | Heartbeat with elapsed seconds (keeps UI alive during long scrapes) |
 | `done` | Final JSON result |
-| `error` | Error message |
+| `error` | Error message (human-readable) |
 
 **Validation errors** return HTTP `422` with a JSON body:
 
@@ -297,8 +365,11 @@ import urllib.request
 
 body = json.dumps({
     "url": "https://www.bilibili.com/video/BV1yk7X6KEz4",
-    "wait_ms": 6000,
+    "wait_ms": 8000,
     "use_chrome": True,
+    "download_media": True,
+    "use_saved_profile": True,
+    "auto_selector": False,
 }).encode()
 req = urllib.request.Request(
     "http://127.0.0.1:8000/api/scrape",
@@ -306,7 +377,7 @@ req = urllib.request.Request(
     headers={"Content-Type": "application/json"},
     method="POST",
 )
-with urllib.request.urlopen(req, timeout=180) as resp:
+with urllib.request.urlopen(req, timeout=300) as resp:
     for line in resp.read().decode().splitlines():
         if line.startswith("data: "):
             print(line[6:])
@@ -336,31 +407,50 @@ After a successful scrape, the `done` event contains:
   "platform": "bilibili",
   "text_paragraphs": ["播放 5,574,174 · 点赞 182,118 · ...", "UP主: ...", "Description..."],
   "comments": ["user: comment text"],
-  "videos": ["https://...m4s?..."],
+  "videos": ["/downloads/My_Video_1234567890/videos/My_Video.mp4"],
   "images": [
     "https://i2.hdslb.com/bfs/archive/cover.jpg",
     "https://i1.hdslb.com/bfs/face/avatar.jpg"
   ],
   "meta": {
+    "video_platform": "bilibili",
     "bilibili_bvid": "BV1yk7X6KEz4",
     "bilibili_aid": "116686023891513",
     "bilibili_cid": "38829687897"
   },
   "platform_data": {
+    "platform": "bilibili",
     "bvid": "BV1yk7X6KEz4",
     "aid": 116686023891513,
-    "cid": 38829687897,
     "title": "...",
     "description": "...",
     "owner": { "name": "...", "face": "..." },
     "stat": { "view": 5574174, "like": 182118, "reply": 1791 },
     "video_streams": [{ "url": "...", "width": 1920, "height": 1080 }],
-    "audio_streams": [{ "url": "..." }]
+    "audio_streams": [{ "url": "..." }],
+    "comments": ["user: comment text"]
+  },
+  "downloads": {
+    "dir": "C:\\...\\downloads\\My_Video_1234567890",
+    "web_dir": "/downloads/My_Video_1234567890",
+    "images": [
+      { "url": "https://...", "path": "...", "web_path": "/downloads/.../images/001.jpg", "filename": "001.jpg" }
+    ],
+    "videos": [
+      {
+        "url": "https://...",
+        "path": "...",
+        "web_path": "/downloads/.../videos/My_Video.mp4",
+        "filename": "My_Video.mp4",
+        "mime": "video/mp4",
+        "playable": true
+      }
+    ]
   }
 }
 ```
 
-Results are displayed across tabs (Text / Comments / Videos / Images / **Selectors** / Metadata / Log) and can be exported to TXT or JSON.
+Results are displayed across tabs (Text / Comments / **Videos** / Images / **Selectors** / Metadata / Log) and can be exported to TXT or JSON.
 
 ---
 
@@ -385,18 +475,22 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 | Problem | Solution |
 |---------|----------|
 | Playwright fails to launch | Run `python -m playwright install chromium` |
-| Port 8000 in use | Stop other processes: `netstat -ano \| findstr :8000` (Windows) |
+| Port 8000 in use | Run `.\scripts\start.ps1` (Windows) or use the port shown in terminal (e.g. 8001) |
+| `ERR_CONNECTION_CLOSED` on navigate | Clear dead `HTTP_PROXY` env var; leave Proxy empty for direct connection; try Visible + system Chrome |
 | Cloudflare / WAF blocks | Use **Visible** mode + system Chrome + proxy |
 | Empty content on SPA | Increase JS wait time; enable auto-scroll |
-| CAPTCHA appears | Switch to **Visible** mode and solve manually |
+| CAPTCHA appears | Switch to **Visible** mode, enable Remember login, solve manually once |
 | System Chrome not found | Uncheck **Use system Chrome** or install Chrome |
 | Wrong content extracted | Leave selectors empty; enable **Smart auto-selector** |
 | AI selector not triggered | Set `OPENAI_API_KEY` in `.env` or paste key in UI |
-| AI request fails | Check `ai_base_url` / `ai_model`; verify provider compatibility |
-| Bilibili: too many junk images | Fixed in latest version — only cover/avatar/first-frame kept |
-| Bilibili: few or no comments | Paste login Cookie (`SESSDATA`, `bili_jct`) in Advanced Options |
-| Bilibili: video URLs expire | CDN links are signed and time-limited; download soon after scrape |
-| Bilibili: `.m4s` streams | DASH segments — merge with ffmpeg to get a full MP4 file |
+| Video platform: generic scrape only | Enable Remember login + Visible browser; check Log for captcha |
+| Video won't play (black player) | Re-scrape with Auto-download on; install **ffmpeg** for DASH merge |
+| Downloaded file is HTML not video | Stream URL expired or needs login — use Visible mode + saved profile |
+| Bilibili: too many junk images | Fixed — only cover / avatar / first-frame kept |
+| Bilibili: few comments | Enable Remember login or paste `BILI_COOKIE` in Advanced Options |
+| Bilibili / YouTube: stream URLs expire | CDN links are time-limited; download soon after scrape |
+| `.m4s` streams | Install ffmpeg — auto-merged to `.mp4` when available |
+| Profile locked error | Close other Chrome / scraper windows using `.chrome_profile/` |
 
 ---
 
@@ -405,7 +499,7 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 - Only scrape content you are authorized to access. Respect `robots.txt` and website terms of service.
 - This tool is for learning and legitimate research — it cannot bypass all CAPTCHAs or commercial WAF systems.
 - Use the `cookie` option only for your own session state; never use others' credentials.
-- Bilibili video streams may be protected by copyright — use extracted data responsibly.
+- Video streams may be protected by copyright — use extracted data responsibly.
 
 ---
 

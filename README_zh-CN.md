@@ -4,7 +4,7 @@
 
 **语言 / Language：** [English](README.md) | **简体中文**
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey) ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey) ![Version](https://img.shields.io/badge/version-1.3.0-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
@@ -23,16 +23,29 @@
 - 自动识别正文 + 可选 CSS 选择器覆盖
 - 启发式评论提取 + 可选 CSS 选择器覆盖
 - 视频与图片链接提取（支持 `data-src` 等懒加载属性）
-- 智能图片过滤 — 自动跳过图标、UI 资源和无效缩略图
+- 智能图片过滤 — 自动跳过图标、UI 资源、推荐缩略图和无效链接
 - 从 `<meta>` 标签提取元数据
 - 导出结果为 TXT 或 JSON
 
-### 平台支持：哔哩哔哩 (Bilibili)
-- 自动识别主流视频平台（Bilibili、YouTube、Vimeo、TikTok、抖音、Twitter/X、Twitch 等）
-- 提取标题、简介、UP 主、播放量/点赞/投币等统计数据
-- 解析 `__INITIAL_STATE__` 和 `__playinfo__` 获取 **DASH 视频/音频流地址**
-- 精选图片：仅保留封面、UP 头像、首帧预览（过滤推荐区缩略图）
-- 支持部分评论抓取；完整评论需登录 Cookie
+### 视频平台（`video_platforms/`）
+- 自动识别主流视频站：**哔哩哔哩**、**YouTube**、**Vimeo**、**TikTok**、**抖音**、**Twitter/X**、**Twitch**、**Dailymotion**、**Niconico**
+- **B 站** — 专用处理器：`__INITIAL_STATE__`、`__playinfo__`、WBI 评论分页、DASH 流媒体
+- **其他平台** — 通用处理器：Open Graph、JSON-LD、`ytInitialPlayerResponse`、DOM `<video>` 标签
+- 统一结果结构：`platform`、`platform_data`、精选图片（封面 / 头像 / 首帧）
+- 视频平台 URL 会自动跳过通用自动选择器
+
+### 媒体下载与页面内播放
+- **自动下载** 图片和视频到本地 `downloads/` 目录
+- 按文件魔数校验视频内容 — 拒绝 HTML 错误页（不会出现假 `.bin` / `.mp4`）
+- **ffmpeg** 转封装：将 B 站 DASH（`.m4s`）合并为浏览器可播放的 `.mp4`
+- **Videos 选项卡** — 内嵌 `<video>` 播放器，点击 ▶ 即可观看本地文件
+- `/downloads/...` 以正确的 `video/mp4` MIME 类型提供服务
+
+### 记住登录（全站通用）
+- **Remember login** — 持久化 Chrome 配置保存在 `.chrome_profile/`
+- 在 **Visible browser** 模式下各站登录一次，后续抓取自动复用会话
+- 适用于 B 站、YouTube、论坛及任何需要登录的网站
+- 高级选项中的 Cookie 可在需要时覆盖已保存的会话
 
 ### 智能自动选择器
 - **启发式 DOM 评分** — 无需手动填写 CSS 选择器即可定位正文与评论区域
@@ -48,9 +61,10 @@
 - 模拟人类行为（鼠标移动、滚动）
 - Cloudflare / WAF 挑战页检测与自动等待
 - 多策略重试：无头 → 延长等待 → 有界面浏览器回退
-- HTTP/SOCKS5 **代理** 支持（可选认证）
-- Cookie 注入以维持登录态
+- 网络错误自动重试导航；失效的环境变量代理自动跳过
+- HTTP/SOCKS5 **代理** 支持（界面填写或 `SCRAPER_PROXY` / `HTTP_PROXY` 环境变量）
 - 可配置 JS 等待时间与自动滚动
+- **端口自动选择** — 8000 被占用时自动尝试 8001+
 
 ---
 
@@ -58,25 +72,30 @@
 
 ```
 spaider_crawler/
-├── app.py              # FastAPI Web 服务 + SSE API
+├── app.py              # FastAPI Web 服务 + SSE API + /downloads 媒体路由
 ├── scraper_core.py     # Playwright 管道 + 内容解析
 ├── selector_engine.py  # 智能 CSS 选择器发现（启发式 + AI）
+├── media_downloader.py # 自动下载图片/视频；ffmpeg 合并；MIME 类型
 ├── video_platforms/    # 多平台视频元数据与流媒体提取
+│   ├── __init__.py     # 检测 / 提取 / 合并入口
+│   ├── registry.py     # 平台 URL 匹配与调度
 │   ├── bilibili.py     # B 站处理器（WBI 评论、DASH 流）
-│   ├── generic.py      # YouTube、Vimeo、TikTok 等（meta/JSON-LD）
-│   └── merge.py        # 统一结果合并
+│   ├── generic.py      # YouTube、Vimeo、TikTok 等
+│   └── merge.py        # 统一结果合并 → platform_data
 ├── image_utils.py      # 图片 URL 规范化与垃圾过滤
 ├── requirements.txt
 ├── payload.json        # API 请求示例
 ├── demo.gif            # README 使用演示动图
-├── .env.example        # AI API Key 模板（复制为 .env）
+├── .env.example        # 环境变量模板（复制为 .env）
 ├── templates/
 │   └── index.html      # Web 界面
 ├── static/
 │   ├── css/style.css
 │   └── js/app.js
 └── scripts/
-    └── record_demo_gif.py  # 重新生成 README 演示 GIF
+    ├── start.ps1       # 清理旧进程并在 8000 端口启动（Windows）
+    ├── scrape_video.py # CLI：抓取任意支持的视频 URL → JSON
+    └── record_demo_gif.py
 ```
 
 ---
@@ -86,6 +105,7 @@ spaider_crawler/
 - Python 3.10+
 - `pip` 及可写的 Python 环境
 - Google Chrome（可选，推荐用于更强反检测）
+- **ffmpeg**（可选，推荐用于将 DASH 流合并为可播放 MP4）
 
 依赖见 `requirements.txt`。
 
@@ -117,7 +137,7 @@ python -m playwright install chromium
 
 > **提示：** 安装 [Google Chrome](https://www.google.com/chrome/) 并在高级选项中启用 **Use system Chrome**，可获得更好的指纹伪装效果。
 
-4.（可选）配置 AI 选择器兜底 — 将 `.env.example` 复制为 `.env` 并填入 API Key：
+4.（可选）配置环境变量 — 将 `.env.example` 复制为 `.env`：
 
 ```bash
 cp .env.example .env   # Windows: copy .env.example .env
@@ -125,21 +145,33 @@ cp .env.example .env   # Windows: copy .env.example .env
 
 ```env
 OPENAI_API_KEY=sk-your-key-here
-# DeepSeek: AI_BASE_URL=https://api.deepseek.com/v1  AI_MODEL=deepseek-chat
-# Ollama:   AI_BASE_URL=http://127.0.0.1:11434/v1   AI_MODEL=llama3.2
+
+# 可选代理（也可从 HTTP_PROXY / HTTPS_PROXY 读取）
+# SCRAPER_PROXY=http://127.0.0.1:7890
+
+# 可选 B 站 Cookie 覆盖（优先使用已保存的 Chrome 配置）
+# BILI_COOKIE=SESSDATA=...; bili_jct=...
 ```
 
 ---
 
 ## 快速开始
 
-启动 Web 界面：
+**Windows（推荐）：**
+
+```powershell
+.\scripts\start.ps1
+```
+
+**或手动启动：**
 
 ```bash
 python app.py
 ```
 
-在浏览器打开 `http://127.0.0.1:8000/`，输入 URL，点击 **Start Scrape**。
+在终端显示的地址打开（通常为 `http://127.0.0.1:8000/`），确认页眉显示 **v1.3.0**。
+
+输入 URL，点击 **Start Scrape**。
 
 或直接使用 uvicorn：
 
@@ -147,23 +179,44 @@ python app.py
 python -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 示例：抓取 B 站视频
+### 示例：B 站视频
 
 ```
 https://www.bilibili.com/video/BV1yk7X6KEz4
 ```
 
-推荐设置：
+| 选项 | 建议值 |
+|------|--------|
+| Remember login | 开启（Visible 模式登录一次） |
+| JS wait | `8000` ms |
+| Auto-scroll | 开启 |
+| Use system Chrome | 开启 |
+| Auto-download | 开启 |
+| Smart auto-selector | 关闭（视频平台会自动禁用） |
+| Browser mode | Visible（首次运行 / 验证码） |
+
+### 示例：YouTube 视频
+
+```
+https://www.youtube.com/watch?v=...
+```
 
 | 选项 | 建议值 |
 |------|--------|
-| JS wait | `5000–8000` ms |
-| Auto-scroll | 开启 |
+| Remember login | 开启 |
+| JS wait | `8000` ms |
 | Use system Chrome | 开启 |
-| Smart auto-selector | 可选（B 站使用专用解析器） |
-| Cookie | 粘贴 B 站登录 Cookie 以抓取完整评论 |
+| Visible browser | 开启（获取流媒体地址需要） |
+| Auto-download | 开启 |
+| Proxy | 仅在网络需要时填写 |
 
-结果可在 **Text**、**Videos**、**Images** 和 **Metadata**（`bilibili` 字段）中查看。
+结果可在 **Text**、**Videos**（内嵌播放器）、**Images** 和 **Metadata**（`platform`、`platform_data`）中查看。
+
+### 命令行抓取
+
+```bash
+python scripts/scrape_video.py "https://www.bilibili.com/video/BV1yk7X6KEz4" output.json
+```
 
 ---
 
@@ -172,23 +225,25 @@ https://www.bilibili.com/video/BV1yk7X6KEz4
 | 选项 | 说明 |
 |------|------|
 | Text / Comment selector | CSS 选择器；留空则自动识别 |
-| Cookie | 会话 Cookie（`key1=val1; key2=val2`） |
-| Proxy | `http://host:port` 或 `socks5://user:pass@host:port` |
+| **Remember login** | 持久化 `.chrome_profile/` — 在 Visible 模式各站登录一次 |
+| Cookie | 可选会话覆盖（`key1=val1; key2=val2`） |
+| Proxy | `http://host:port` 或 `socks5://user:pass@host:port`；留空则直连 |
 | JS wait (ms) | 页面加载后等待 JS 的时间（500–30000） |
 | Browser mode | `Auto` / `Headless only` / `Visible browser` |
 | Max retries | 备用策略重试次数（0–4） |
 | Use system Chrome | 优先使用本机 Chrome 而非内置 Chromium |
 | Simulate human | 随机鼠标移动与滚动 |
 | Block resources | 跳过图片/字体以加速（可能触发检测） |
+| **Auto-download** | 保存图片和视频到 `downloads/`；在 Videos 选项卡播放 |
 | Smart auto-selector | DOM 评分自动发现正文/评论 CSS 选择器 |
 | Enable AI fallback | 启发式失败时调用 LLM（需 API Key） |
 | AI API key / base URL / model | 覆盖环境变量；支持 OpenAI 兼容服务商 |
 
-**受保护站点推荐：** 浏览器模式选 **Auto** 或 **Visible**，启用 **Use system Chrome**，IP 被封时配置代理。
+**需要登录的站点：** Remember login + **Visible** 模式 + 系统 Chrome；必要时再填 Cookie。
 
-**未知页面结构推荐：** CSS 选择器留空，启用 **Smart auto-selector**；复杂页面配置 API Key。
+**视频平台：** 选择器留空即可，`video_platforms/` 自动运行；开启 Auto-download 可本地播放。
 
-**B 站视频：** 选择器留空即可，自动启用 B 站专用解析器；完整评论需填写 Cookie。
+**未知页面结构：** CSS 选择器留空，启用 **Smart auto-selector**；复杂页面配置 API Key。
 
 ---
 
@@ -218,11 +273,19 @@ HTML → DOM 评分 → 生成 CSS 选择器 → 验证 → 重新提取
 
 ### `GET /api/health`
 
-健康检查。
+健康检查与版本信息。
 
 ```json
-{ "status": "ok" }
+{
+  "status": "ok",
+  "version": "1.3.0",
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile"]
+}
 ```
+
+### `GET /downloads/{path}`
+
+以正确 MIME 类型（如 `video/mp4`）提供已下载的媒体文件，供浏览器内播放。
 
 ### `POST /api/scrape`
 
@@ -248,7 +311,9 @@ HTML → DOM 评分 → 生成 CSS 选择器 → 验证 → 重新提取
   "auto_selector_ai": true,
   "ai_api_key": "",
   "ai_base_url": "",
-  "ai_model": ""
+  "ai_model": "",
+  "download_media": true,
+  "use_saved_profile": true
 }
 ```
 
@@ -271,14 +336,17 @@ HTML → DOM 评分 → 生成 CSS 选择器 → 验证 → 重新提取
 | `ai_api_key` | string | `""` | API Key（回退到 `OPENAI_API_KEY` 环境变量） |
 | `ai_base_url` | string | `""` | API 基础 URL（默认 OpenAI） |
 | `ai_model` | string | `""` | 模型名称（默认 `gpt-4o-mini`） |
+| `download_media` | bool | `true` | 下载图片/视频到 `downloads/` |
+| `use_saved_profile` | bool | `true` | 使用持久化 `.chrome_profile/` 登录态 |
 
 **SSE 事件：**
 
 | 事件 | 说明 |
 |------|------|
 | `log` | 进度日志 |
+| `ping` | 心跳（含已用秒数，长时间抓取时保持界面响应） |
 | `done` | 最终 JSON 结果 |
-| `error` | 错误信息 |
+| `error` | 错误信息（可读提示） |
 
 **校验失败** 返回 HTTP `422` 及 JSON 响应：
 
@@ -297,8 +365,11 @@ import urllib.request
 
 body = json.dumps({
     "url": "https://www.bilibili.com/video/BV1yk7X6KEz4",
-    "wait_ms": 6000,
+    "wait_ms": 8000,
     "use_chrome": True,
+    "download_media": True,
+    "use_saved_profile": True,
+    "auto_selector": False,
 }).encode()
 req = urllib.request.Request(
     "http://127.0.0.1:8000/api/scrape",
@@ -306,7 +377,7 @@ req = urllib.request.Request(
     headers={"Content-Type": "application/json"},
     method="POST",
 )
-with urllib.request.urlopen(req, timeout=180) as resp:
+with urllib.request.urlopen(req, timeout=300) as resp:
     for line in resp.read().decode().splitlines():
         if line.startswith("data: "):
             print(line[6:])
@@ -336,31 +407,50 @@ Invoke-WebRequest `
   "platform": "bilibili",
   "text_paragraphs": ["播放 5,574,174 · 点赞 182,118 · ...", "UP主: ...", "简介..."],
   "comments": ["用户: 评论内容"],
-  "videos": ["https://...m4s?..."],
+  "videos": ["/downloads/My_Video_1234567890/videos/My_Video.mp4"],
   "images": [
     "https://i2.hdslb.com/bfs/archive/cover.jpg",
     "https://i1.hdslb.com/bfs/face/avatar.jpg"
   ],
   "meta": {
+    "video_platform": "bilibili",
     "bilibili_bvid": "BV1yk7X6KEz4",
     "bilibili_aid": "116686023891513",
     "bilibili_cid": "38829687897"
   },
   "platform_data": {
+    "platform": "bilibili",
     "bvid": "BV1yk7X6KEz4",
     "aid": 116686023891513,
-    "cid": 38829687897,
     "title": "...",
     "description": "...",
     "owner": { "name": "...", "face": "..." },
     "stat": { "view": 5574174, "like": 182118, "reply": 1791 },
     "video_streams": [{ "url": "...", "width": 1920, "height": 1080 }],
-    "audio_streams": [{ "url": "..." }]
+    "audio_streams": [{ "url": "..." }],
+    "comments": ["用户: 评论内容"]
+  },
+  "downloads": {
+    "dir": "C:\\...\\downloads\\My_Video_1234567890",
+    "web_dir": "/downloads/My_Video_1234567890",
+    "images": [
+      { "url": "https://...", "path": "...", "web_path": "/downloads/.../images/001.jpg", "filename": "001.jpg" }
+    ],
+    "videos": [
+      {
+        "url": "https://...",
+        "path": "...",
+        "web_path": "/downloads/.../videos/My_Video.mp4",
+        "filename": "My_Video.mp4",
+        "mime": "video/mp4",
+        "playable": true
+      }
+    ]
   }
 }
 ```
 
-结果展示在多个选项卡（Text / Comments / Videos / Images / **Selectors** / Metadata / Log），可导出为 TXT 或 JSON。
+结果展示在多个选项卡（Text / Comments / **Videos** / Images / **Selectors** / Metadata / Log），可导出为 TXT 或 JSON。
 
 ---
 
@@ -385,18 +475,22 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 | 问题 | 解决方案 |
 |------|----------|
 | Playwright 无法启动 | 运行 `python -m playwright install chromium` |
-| 端口 8000 被占用 | 结束占用进程：`netstat -ano \| findstr :8000`（Windows） |
+| 端口 8000 被占用 | 运行 `.\scripts\start.ps1`（Windows）或使用终端显示的端口（如 8001） |
+| 导航报 `ERR_CONNECTION_CLOSED` | 清除失效的 `HTTP_PROXY` 环境变量；Proxy 留空直连；尝试 Visible + 系统 Chrome |
 | Cloudflare / WAF 拦截 | 使用 **Visible** 模式 + 系统 Chrome + 代理 |
 | SPA 内容为空 | 增加 JS 等待时间；启用自动滚动 |
-| 出现 CAPTCHA | 切换到 **Visible** 模式手动完成验证 |
+| 出现 CAPTCHA | 切换到 **Visible** 模式，开启 Remember login，手动完成一次验证 |
 | 找不到系统 Chrome | 取消 **Use system Chrome** 或安装 Chrome |
 | 提取内容不正确 | 选择器留空；启用 **Smart auto-selector** |
 | AI 选择器未触发 | 在 `.env` 设置 `OPENAI_API_KEY` 或在界面填入 Key |
-| AI 请求失败 | 检查 `ai_base_url` / `ai_model`；确认服务商兼容性 |
-| B 站：图片数量异常/无法加载 | 最新版已修复 — 仅保留封面/头像/首帧 |
-| B 站：评论很少或为空 | 在高级选项粘贴登录 Cookie（`SESSDATA`、`bili_jct`） |
-| B 站：视频链接过期 | CDN 链接带签名有时效，请尽快下载 |
-| B 站：`.m4s` 分片 | DASH 流媒体分片，需用 ffmpeg 合并为完整 MP4 |
+| 视频平台：仅通用抓取 | 开启 Remember login + Visible 浏览器；查看 Log 是否有验证码 |
+| 视频无法播放（黑屏） | 重新抓取并开启 Auto-download；安装 **ffmpeg** 合并 DASH |
+| 下载到的是 HTML 而非视频 | 流地址过期或需登录 — 使用 Visible 模式 + 已保存配置 |
+| B 站：图片数量异常 | 已修复 — 仅保留封面 / 头像 / 首帧 |
+| B 站：评论很少或为空 | 开启 Remember login 或在高级选项粘贴 `BILI_COOKIE` |
+| B 站 / YouTube：视频链接过期 | CDN 链接带签名有时效，请尽快下载 |
+| `.m4s` 分片 | 安装 ffmpeg — 可用时自动合并为 `.mp4` |
+| Profile locked 错误 | 关闭其他占用 `.chrome_profile/` 的 Chrome / 爬虫窗口 |
 
 ---
 
@@ -405,7 +499,7 @@ CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"
 - 仅抓取你有权访问的内容，遵守 `robots.txt` 和网站服务条款。
 - 本工具仅供学习与合法研究，无法绕过所有 CAPTCHA 或商业 WAF。
 - `cookie` 选项仅用于你自己的会话，切勿使用他人凭证。
-- B 站视频流可能受版权保护，请合法使用抓取结果。
+- 视频流可能受版权保护，请合法使用抓取结果。
 
 ---
 

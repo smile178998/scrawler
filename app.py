@@ -11,14 +11,14 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from scraper_core import run_pipeline
-from media_downloader import DOWNLOADS_ROOT
+from media_downloader import DOWNLOADS_ROOT, MIME_BY_EXT
 
 try:
     from dotenv import load_dotenv
@@ -31,7 +31,19 @@ BASE_DIR = Path(__file__).resolve().parent
 DOWNLOADS_ROOT.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Modern Web Scraper", version="1.3.0")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-app.mount("/downloads", StaticFiles(directory=str(DOWNLOADS_ROOT)), name="downloads")
+
+
+@app.get("/downloads/{file_path:path}")
+async def serve_download(file_path: str):
+    """Serve downloaded media with correct video MIME types for in-browser playback."""
+    root = DOWNLOADS_ROOT.resolve()
+    full = (root / file_path).resolve()
+    if not str(full).startswith(str(root)) or not full.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = MIME_BY_EXT.get(full.suffix.lower())
+    if not media_type:
+        media_type = "image/jpeg" if full.suffix.lower() in (".jpg", ".jpeg") else "application/octet-stream"
+    return FileResponse(full, media_type=media_type, filename=full.name)
 
 
 class ScrapeRequest(BaseModel):

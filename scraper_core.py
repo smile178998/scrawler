@@ -8,6 +8,7 @@ import os
 import queue
 import random
 import re
+import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,6 +124,7 @@ BROWSER_ARGS = [
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-dev-shm-usage",
+    "--disable-quic",
 ]
 
 CHALLENGE_TITLE_HINTS = [
@@ -257,6 +259,148 @@ def _parse_proxy(proxy: str) -> dict | None:
         result["password"] = parsed.password
 
     return result
+
+
+NETWORK_ERROR_MARKERS = (
+    "ERR_CONNECTION_CLOSED",
+    "ERR_CONNECTION_REFUSED",
+    "ERR_CONNECTION_RESET",
+    "ERR_TIMED_OUT",
+    "ERR_NAME_NOT_RESOLVED",
+    "ERR_NETWORK_CHANGED",
+    "ERR_INTERNET_DISCONNECTED",
+    "ECONNRESET",
+    "ETIMEDOUT",
+)
+
+PROXY_RECOMMENDED_HOSTS = (
+    "youtube.com",
+    "youtu.be",
+    "googlevideo.com",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "instagram.com",
+    "tiktok.com",
+)
+
+
+def _resolve_proxy(explicit: str) -> tuple[str, str]:
+    """Return (proxy_url, source). Source is 'ui', env var name, or ''."""
+    explicit = (explicit or "").strip()
+    if explicit:
+        return explicit, "ui"
+    for key in ("SCRAPER_PROXY", "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"):
+        val = os.getenv(key, "").strip()
+        if val:
+            return val, key
+    return "", ""
+
+
+def _proxy_endpoint_reachable(server: str, timeout: float = 2.0) -> bool:
+    parsed = urlparse(server if "://" in server else f"http://{server}")
+    host = parsed.hostname
+    if not host:
+        return False
+    port = parsed.port or (1080 if parsed.scheme.startswith("socks") else 8080)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _validate_proxy(proxy: str, source: str, log: LogFn) -> str:
+    """Drop dead proxy settings (common when HTTP_PROXY points to a closed local port)."""
+    if not proxy:
+        return ""
+    parsed = _parse_proxy(proxy)
+    if not parsed:
+        log(f"[Warn] Invalid proxy ignored: {proxy}")
+        return ""
+    server = parsed["server"]
+    if _proxy_endpoint_reachable(server):
+        return proxy
+    if source == "ui":
+        log(f"[Warn] Proxy {server} is not reachable — check address/port.")
+        return proxy
+    log(
+        f"[Warn] Environment {source}={proxy!r} but nothing is listening — "
+        "using direct connection. Unset HTTP_PROXY or start your proxy app."
+    )
+    return ""
+
+
+def _site_needs_proxy(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return any(marker in host for marker in PROXY_RECOMMENDED_HOSTS)
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    msg = str(exc).upper()
+    return any(marker in msg for marker in NETWORK_ERROR_MARKERS)
+
+
+def _format_browser_error(
+    exc: BaseException, url: str = "", *, used_proxy: bool = False
+) -> str:
+    msg = str(exc)
+    host = urlparse(url).netloc if url else "target site"
+    short = msg.splitlines()[0]
+
+    if _is_network_error(exc):
+        parts = [f"Connection failed ({host}): {short}"]
+        if used_proxy:
+            parts.append(
+                "Proxy is enabled but the tunnel closed. "
+                "Clear Proxy in Advanced Options, unset HTTP_PROXY/SCRAPER_PROXY in environment, "
+                "or fix the proxy address."
+            )
+        else:
+            parts.append(
+                "Try: enable Use system Chrome + Visible browser, "
+                "disable VPN/antivirus temporarily, or open the URL in normal Chrome first."
+            )
+        return " ".join(parts)
+
+    if "Timeout" in msg or "timeout" in msg:
+        return (
+            f"Page load timed out ({host}). "
+            "Increase JS wait or switch Browser mode to Visible."
+        )
+
+    return msg
+
+
+def _goto_page(page: Page, url: str, log: LogFn) -> None:
+    """Navigate with retries — handles transient network drops."""
+    last_exc: Exception | None = None
+    wait_modes = ("domcontentloaded", "commit")
+
+    for attempt in range(3):
+        for wait_until in wait_modes:
+            try:
+                page.goto(url, wait_until=wait_until, timeout=90_000)
+                if wait_until == "commit":
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=20_000)
+                    except Exception:
+                        pass
+                return
+            except Exception as exc:
+                last_exc = exc
+                if not _is_network_error(exc):
+                    raise
+                short = str(exc).split("\n", 1)[0]
+                log(
+                    f"[Browser] Network error ({wait_until}, "
+                    f"attempt {attempt + 1}/3): {short}"
+                )
+                page.wait_for_timeout(1500 * (attempt + 1))
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Failed to navigate to {url}")
 
 
 def _parse_cookies(cookie: str, url: str) -> list[dict]:
@@ -507,7 +651,7 @@ def _fetch_on_page(
         log("[Browser] Blocking images/fonts/styles for faster load.")
 
     log(f"[Browser] Navigating to {cfg.url} ...")
-    page.goto(cfg.url, wait_until="domcontentloaded", timeout=60_000)
+    _goto_page(page, cfg.url, log)
 
     try:
         page.wait_for_load_state("networkidle", timeout=15_000)
@@ -636,12 +780,23 @@ def browser_fetch(
     def log(msg: str):
         log_q.put(("log", msg))
 
+    proxy, source = _resolve_proxy(str(kwargs.get("proxy", "")).strip())
+    proxy = _validate_proxy(proxy, source, log)
+    if proxy and source == "ui":
+        parsed = _parse_proxy(proxy)
+        if parsed:
+            log(f"[Browser] Using proxy: {parsed['server']}")
+    elif proxy and source not in ("", "ui"):
+        parsed = _parse_proxy(proxy)
+        if parsed:
+            log(f"[Browser] Using proxy from {source}: {parsed['server']}")
+
     cfg = FetchConfig(
         url=url,
         wait_ms=wait_ms,
         cookie=cookie,
         scroll=scroll,
-        proxy=str(kwargs.get("proxy", "")).strip(),
+        proxy=proxy,
         use_chrome=bool(kwargs.get("use_chrome", True)),
         headless=str(kwargs.get("headless", "auto")),
         max_retries=int(kwargs.get("max_retries", 2)),
@@ -693,6 +848,33 @@ def browser_fetch(
                 if attempt < len(strategies) - 1:
                     time.sleep(random.uniform(2.0, 4.0))
 
+    if best is None and cfg.proxy and last_error and _is_network_error(last_error):
+        log("[Browser] Proxy/direct failed — final retry without proxy ...")
+        cfg = FetchConfig(
+            url=cfg.url,
+            wait_ms=cfg.wait_ms,
+            cookie=cfg.cookie,
+            scroll=cfg.scroll,
+            proxy="",
+            use_chrome=cfg.use_chrome,
+            headless=cfg.headless,
+            max_retries=cfg.max_retries,
+            simulate_human=cfg.simulate_human,
+            block_resources=cfg.block_resources,
+            use_saved_profile=cfg.use_saved_profile,
+        )
+        with sync_playwright() as pw:
+            profile = random.choice(BROWSER_PROFILES)
+            headless = cfg.headless == "hidden"
+            log(f"[Browser] Direct retry ({'headless' if headless else 'visible'}) ...")
+            try:
+                data = _attempt_fetch(pw, cfg, profile, headless, cfg.wait_ms, log)
+                best = data
+                best_score = _content_quality(data["html"], data["inner_text"], data, cfg.url)
+            except Exception as exc:
+                last_error = exc
+                log(f"[Browser] Direct retry failed: {exc}")
+
     if best is None:
         raise last_error or RuntimeError("All fetch attempts failed")
 
@@ -742,6 +924,7 @@ def parse_content(data: dict, text_sel: str, comment_sel: str) -> dict:
         if anchor["href"].lower().endswith(VIDEO_EXTS):
             videos.append(urljoin(base, anchor["href"]))
     videos = _dedup(videos)
+    videos = [v for v in videos if v and not str(v).startswith("blob:")]
 
     meta: dict[str, str] = {}
     for tag in soup.find_all("meta"):
@@ -867,8 +1050,15 @@ def run_pipeline(
         log_q.put(("log", msg))
 
     try:
+        raw_proxy, proxy_source = _resolve_proxy(str(kwargs.get("proxy", "")).strip())
+        proxy = _validate_proxy(raw_proxy, proxy_source, log)
+        kwargs["proxy"] = proxy
+
         if kwargs.get("use_saved_profile", True):
             log("[Browser] Saved profile ON — sign in once per site (Visible mode); Cookie optional.")
+
+        if proxy_source in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "SCRAPER_PROXY"):
+            log(f"[Browser] Proxy loaded from environment ({proxy_source}).")
 
         video_mode = is_video_platform_url(url)
         if video_mode:
@@ -926,4 +1116,5 @@ def run_pipeline(
 
         log_q.put(("done", result))
     except Exception as exc:
-        log_q.put(("error", str(exc)))
+        used_proxy = bool(kwargs.get("proxy"))
+        log_q.put(("error", _format_browser_error(exc, url, used_proxy=used_proxy)))

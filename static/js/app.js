@@ -40,6 +40,12 @@ function clamp(value, min, max, fallback) {
   return Math.min(max, Math.max(min, num));
 }
 
+function needsProxyHint(url) {
+  return /youtube\.com|youtu\.be|googlevideo\.com|twitter\.com|(?:^|\.)x\.com|facebook\.com|instagram\.com/i.test(
+    url || ""
+  );
+}
+
 function isVideoPlatformUrl(url) {
   return /bilibili\.com|b23\.tv|youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|douyin\.com|twitch\.tv|dailymotion\.com|nicovideo\.jp|(?:^|\.)twitter\.com|(?:^|\.)x\.com/i.test(
     url || ""
@@ -142,6 +148,9 @@ async function startScrape() {
 
   applyCommonPresets(url);
   applyVideoPresets(url);
+  if (needsProxyHint(url) && fieldValue("proxy")) {
+    appendLog("ℹ  Proxy field is set — ensure the proxy app is running.\n");
+  }
   if (!$("#cookie").value.trim() && !$("#use-saved-profile").checked) {
     appendLog(
       "⚠  Tip: enable「Remember login」to stay signed in on any site without copying Cookie\n",
@@ -310,33 +319,46 @@ function renderResults(r) {
 
   const videoHeader =
     r.downloads?.videos?.length
-      ? `<div class="download-banner">Downloaded ${r.downloads.videos.length} file(s) to <code>${esc(r.downloads.dir)}</code></div>`
+      ? `<div class="download-banner">✓ ${r.downloads.videos.length} video(s) saved — click play below or open in new tab</div>`
       : "";
 
-  const downloadedItems = (r.downloads?.videos || [])
-    .map(
-      (d) =>
-        `<div class="link-item"><span class="idx">✓</span><a href="${escAttr(d.web_path)}" target="_blank" rel="noopener">${esc(d.path.split(/[/\\]/).pop())}</a> <span class="muted">(local)</span></div>`
-    )
+  const playableItems = (r.downloads?.videos || [])
+    .filter((d) => d.playable !== false)
+    .map((d, i) => {
+      const src = escAttr(d.web_path);
+      const name = esc(d.filename || d.path?.split(/[/\\]/).pop() || `video_${i + 1}`);
+      const mime = escAttr(d.mime || videoMimeFromExt(name));
+      return `<div class="video-card">
+          <video controls preload="metadata" playsinline
+            onerror="handleVideoError(this)">
+            <source src="${src}" type="${mime}" />
+          </video>
+          <div class="video-meta">
+            <a class="video-name" href="${src}" target="_blank" rel="noopener">${name}</a>
+            <span class="muted">local · click ▶ to play</span>
+          </div>
+        </div>`;
+    })
     .join("");
 
-  const streamItems = r.videos
+  const remoteItems = (r.videos || [])
+    .filter((v) => v && !v.startsWith("blob:") && !v.startsWith("/downloads/"))
     .map((v, i) => {
       const local = (r.downloads?.videos || []).find((d) => d.url === v);
       if (local) return "";
-      return `<div class="link-item"><span class="idx">${i + 1}</span><a href="${escAttr(v)}" target="_blank" rel="noopener">${esc(v)}</a></div>`;
+      return `<div class="link-item link-item-muted"><span class="idx">${i + 1}</span><span>${esc(v)}</span> <span class="muted">(remote — not saved)</span></div>`;
     })
     .filter(Boolean)
     .join("");
 
   $("#content-videos").innerHTML =
     videoHeader +
-    (downloadedItems || streamItems
-      ? downloadedItems + streamItems
-      : `<div class="empty-state"><p>No video links found.</p></div>`);
+    (playableItems || remoteItems
+      ? `<div class="video-grid">${playableItems}</div>${remoteItems}`
+      : `<div class="empty-state"><p>No playable videos. Enable「Auto-download」and try again.</p></div>`);
   $("#count-videos").textContent = Math.max(
-    r.videos.length,
-    (r.downloads?.videos || []).length
+    (r.downloads?.videos || []).length,
+    (r.videos || []).filter((v) => v && !v.startsWith("blob:")).length
   );
 
   $("#content-images").innerHTML = displayImages.length
@@ -514,6 +536,26 @@ function normalizeImgUrl(url) {
   }
   return u;
 }
+
+function videoMimeFromExt(filename) {
+  const lower = (filename || "").toLowerCase();
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".mkv")) return "video/x-matroska";
+  return "video/mp4";
+}
+
+function handleVideoError(video) {
+  const card = video.closest(".video-card");
+  if (!card || card.classList.contains("video-failed")) return;
+  card.classList.add("video-failed");
+  const meta = card.querySelector(".video-meta .muted");
+  if (meta) {
+    meta.textContent = "Cannot play — file may be corrupt or needs ffmpeg remux. Re-scrape with Visible browser.";
+  }
+}
+
+window.handleVideoError = handleVideoError;
 
 function handleImgError(img) {
   const remote = img.dataset.remote || "";

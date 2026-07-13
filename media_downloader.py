@@ -36,33 +36,204 @@ def _normalize_url(url: str) -> str:
     return url
 
 
-def _guess_ext(url: str, content_type: str = "", default: str = ".bin") -> str:
+VIDEO_EXTS = (".mp4", ".webm", ".m4v", ".mov", ".mkv", ".m4s", ".ts")
+PLAYABLE_EXTS = (".mp4", ".webm", ".m4v", ".mov", ".mkv")
+
+MIME_BY_EXT = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+}
+
+
+def _mime_for(path: Path) -> str:
+    return MIME_BY_EXT.get(path.suffix.lower(), "application/octet-stream")
+
+
+def _is_html_or_text(data: bytes) -> bool:
+    head = data[:512].lstrip()
+    lower = head.lower()
+    return (
+        head.startswith(b"<")
+        or head.startswith(b"{")
+        or b"<html" in lower
+        or b"<!doctype" in lower
+    )
+
+
+def _is_video_bytes(data: bytes) -> bool:
+    if len(data) < 12:
+        return False
+    if b"ftyp" in data[:16]:
+        return True
+    if data[:4] == b"\x1aE\xdf\xa3":
+        return True
+    if data[:4] == b"RIFF" and b"AVI" in data[:16]:
+        return True
+    if data[0:1] == b"\x47":  # MPEG-TS sync byte
+        return True
+    return False
+
+
+def _guess_ext(url: str, content_type: str = "", default: str = ".mp4") -> str:
     path = url.split("?", 1)[0]
     name = path.rsplit("/", 1)[-1]
     if "." in name:
         ext = "." + name.rsplit(".", 1)[-1].split("@")[0].lower()
-        if 2 < len(ext) <= 6:
+        if ext in VIDEO_EXTS or ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
             return ext
     ct = (content_type or "").lower()
+    if "webm" in ct:
+        return ".webm"
+    if "mp4" in ct or "mpeg" in ct:
+        return ".mp4"
+    if "quicktime" in ct:
+        return ".mov"
     if "jpeg" in ct or "jpg" in ct:
         return ".jpg"
     if "png" in ct:
         return ".png"
     if "webp" in ct:
         return ".webp"
-    if "mp4" in ct:
-        return ".mp4"
     if ".m4s" in url.lower():
         return ".m4s"
     return default
+
+
+def _sniff_video_ext(data: bytes, content_type: str = "") -> str:
+    head = data[:32]
+    if b"ftyp" in head[:16]:
+        return ".mp4"
+    if head[:4] == b"\x1aE\xdf\xa3":
+        return ".webm"
+    if head[:4] == b"RIFF" and b"AVI " in head:
+        return ".avi"
+    ct = (content_type or "").lower()
+    if "webm" in ct:
+        return ".webm"
+    if "mp4" in ct or "mpeg" in ct:
+        return ".mp4"
+    return ".mp4"
+
+
+def _is_downloadable_video_url(url: str) -> bool:
+    u = (url or "").strip().lower()
+    if not u.startswith(("http://", "https://")):
+        return False
+    if u.startswith("blob:") or "javascript:" in u:
+        return False
+    if ".m3u8" in u or ".mpd" in u:
+        return False
+    return True
+
+
+def _video_url_score(url: str) -> int:
+    u = url.lower()
+    score = 0
+    if "googlevideo.com" in u or "videoplayback" in u:
+        score += 60
+    if any(h in u for h in ("mime=video", "type=video")):
+        score += 50
+    if any(ext in u for ext in (".mp4", ".webm", ".m4v", ".mov")):
+        score += 45
+    if "video" in u or "stream" in u:
+        score += 15
+    if "audio" in u or "mime=audio" in u:
+        score -= 30
+    return score
+
+
+def _try_ffmpeg_to_mp4(path: Path, log: LogFn) -> Path | None:
+    """Remux m4s / mislabeled fragments into a browser-playable MP4."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        if path.suffix.lower() == ".m4s":
+            log("[Download] .m4s needs ffmpeg to play in browser — install ffmpeg")
+        return path if path.suffix.lower() in PLAYABLE_EXTS else None
+
+    out = path.with_name(f"{path.stem}_play.mp4")
+    try:
+        subprocess.run(
+            [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(path),
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+        if out.stat().st_size > 0:
+            if path != out and path.exists():
+                path.unlink(missing_ok=True)
+            log(f"[Download] Ready to play: {out.name}")
+            return out
+    except Exception as exc:
+        log(f"[Download] ffmpeg remux failed: {exc}")
+    return path if path.suffix.lower() in PLAYABLE_EXTS else None
+
+
+def _finalize_saved_video(path: Path, log: LogFn) -> Path | None:
+    """Validate bytes, fix extension, remux to MP4 when needed."""
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        log(f"[Download] Cannot read {path.name}: {exc}")
+        return None
+
+    if _is_html_or_text(data):
+        log(
+            f"[Download] Skipped {path.name} — server returned HTML "
+            "(expired URL or login required)."
+        )
+        path.unlink(missing_ok=True)
+        return None
+
+    if not _is_video_bytes(data):
+        log(f"[Download] Skipped {path.name} — not a valid video file.")
+        path.unlink(missing_ok=True)
+        return None
+
+    ext = _sniff_video_ext(data, "")
+    if path.suffix.lower() != ext:
+        target = path.with_suffix(ext)
+        path.rename(target)
+        path = target
+        data = path.read_bytes()
+
+    if path.suffix.lower() in (".m4s", ".ts", ".bin"):
+        return _try_ffmpeg_to_mp4(path, log)
+
+    if path.suffix.lower() not in PLAYABLE_EXTS:
+        target = path.with_suffix(".mp4")
+        path.rename(target)
+        return target
+
+    return path
+
+
+def _ensure_playable_video(path: Path, log: LogFn) -> Path | None:
+    return _finalize_saved_video(path, log)
 
 
 def _headers_for(url: str, referer: str = "") -> dict[str, str]:
     headers = {"User-Agent": DEFAULT_UA}
     if referer:
         headers["Referer"] = referer
+    elif "youtube.com" in url or "googlevideo.com" in url or "youtu.be" in url:
+        headers["Referer"] = "https://www.youtube.com/"
     elif "bilibili" in url or "hdslb.com" in url or "akamaized.net" in url:
         headers["Referer"] = "https://www.bilibili.com/"
+    elif "vimeo.com" in url:
+        headers["Referer"] = "https://vimeo.com/"
     return headers
 
 
@@ -82,11 +253,22 @@ def _download_url(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read()
             content_type = resp.headers.get("Content-Type", "")
-        if not dest.suffix or dest.suffix == ".bin":
-            dest = dest.with_suffix(_guess_ext(url, content_type, ".bin"))
+
+        if _is_html_or_text(data):
+            log(f"[Download] Skipped — response is HTML, not video (check login/URL).")
+            return None
+        if not _is_video_bytes(data):
+            log(f"[Download] Skipped — downloaded content is not a video stream.")
+            return None
+
+        ext = _sniff_video_ext(data, content_type)
+        dest = dest.with_suffix(ext)
         dest.write_bytes(data)
-        log(f"[Download] Saved {dest.name} ({len(data):,} bytes)")
-        return dest
+        final = _finalize_saved_video(dest, log)
+        if not final:
+            return None
+        log(f"[Download] Saved {final.name} ({final.stat().st_size:,} bytes)")
+        return final
     except Exception as exc:
         log(f"[Download] Failed — {exc}")
         return None
@@ -133,10 +315,14 @@ def _try_ffmpeg_merge(
 
 def _entry(base_dir: Path, file_path: Path, url: str, **extra) -> dict:
     rel = file_path.relative_to(base_dir).as_posix()
+    playable = file_path.suffix.lower() in PLAYABLE_EXTS
     return {
         "url": url,
         "path": str(file_path),
+        "filename": file_path.name,
         "web_path": f"/downloads/{rel}",
+        "mime": _mime_for(file_path),
+        "playable": playable,
         **extra,
     }
 
@@ -181,15 +367,17 @@ def _download_platform_video(
             merged = vid_dir / f"{_safe_name(title, 40)}.mp4"
             merged_path = _try_ffmpeg_merge(v_file, a_file, merged, log)
             if merged_path:
-                return [_entry(base_dir, merged_path, v_stream["url"], type="merged_mp4")]
+                return [_entry(base_dir, merged_path, v_stream["url"], type="merged_mp4", playable=True)]
 
-    # Single stream (durl / video-only) or merge unavailable
     ext = v_file.suffix or ".m4s"
     final = vid_dir / f"{_safe_name(title, 40)}{ext}"
     if v_file != final:
         v_file.rename(final)
         v_file = final
-    return [_entry(base_dir, v_file, v_stream["url"], type="video_only")]
+    v_file = _finalize_saved_video(v_file, log)
+    if not v_file:
+        return []
+    return [_entry(base_dir, v_file, v_stream["url"], type="video_only", playable=True)]
 
 
 def _download_generic_videos(
@@ -200,22 +388,35 @@ def _download_generic_videos(
     log: LogFn,
 ) -> list[dict]:
     saved: list[dict] = []
-    for i, raw in enumerate(urls, 1):
-        url = _normalize_url(raw)
-        if not url.startswith(("http://", "https://")) or url.startswith("blob:"):
-            continue
+    candidates = sorted(
+        {_normalize_url(raw) for raw in urls if _is_downloadable_video_url(raw)},
+        key=_video_url_score,
+        reverse=True,
+    )
+    for i, url in enumerate(candidates, 1):
         if url.lower().endswith(".m4s"):
             continue
         dest = _download_url(
             url,
-            vid_dir / f"video_{i}",
+            vid_dir / f"video_{i:02d}.mp4",
             _headers_for(url, referer),
             log,
             timeout=300,
         )
         if dest:
-            saved.append(_entry(base_dir, dest, url))
+            entry = _entry(base_dir, dest, url, playable=True)
+            if entry.get("playable"):
+                saved.append(entry)
+            else:
+                log(f"[Download] {dest.name} saved but not browser-playable.")
     return saved
+
+
+def _filter_display_videos(videos: list[str], downloaded: list[dict]) -> list[str]:
+    """Prefer local playable paths; drop blob and duplicate remote URLs."""
+    if downloaded:
+        return [d["web_path"] for d in downloaded if d.get("web_path")]
+    return [v for v in videos if _is_downloadable_video_url(v)]
 
 
 def download_media(
@@ -257,10 +458,17 @@ def download_media(
             platform_data, vid_dir, root, title, referer, log
         )
     else:
+        stream_urls = [
+            s.get("url")
+            for s in (platform_data.get("video_streams") or [])
+            if s.get("url")
+        ]
+        all_urls = list(dict.fromkeys((result.get("videos") or []) + stream_urls))
         downloaded_videos = _download_generic_videos(
-            result.get("videos") or [], vid_dir, root, referer, log
+            all_urls, vid_dir, root, referer, log
         )
 
+    result["videos"] = _filter_display_videos(result.get("videos") or [], downloaded_videos)
     result["downloads"] = {
         "dir": str(out_dir),
         "web_dir": f"/downloads/{folder_name}",
