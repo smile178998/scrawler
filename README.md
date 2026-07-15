@@ -55,6 +55,7 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 - **Selectors tab** in the UI — shows method, confidence, and discovered selectors; apply to form with one click
 
 ### Anti-detection & reliability
+- **Stealth Fetcher** (`fetcher.py`) — fast HTTP via `curl_cffi`: browser TLS/JA3 fingerprint, realistic headers, optional HTTP/3
 - **System Chrome** support (more realistic fingerprint than bundled Chromium)
 - **playwright-stealth** + built-in fingerprint patches (webdriver, WebGL, headers)
 - Randomized browser profiles (UA, viewport, locale, timezone)
@@ -76,6 +77,7 @@ spaider_crawler/
 ├── scraper_core.py     # Playwright pipeline + content parsing
 ├── selector_engine.py  # Smart CSS selector discovery (heuristic + AI)
 ├── media_downloader.py # Auto-download images/videos; ffmpeg merge; MIME types
+├── fetcher.py          # Stealth HTTP client (TLS fingerprint + HTTP/3 via curl_cffi)
 ├── video_platforms/    # Multi-platform video metadata + stream extraction
 │   ├── __init__.py     # detect / extract / merge entry points
 │   ├── registry.py     # Platform URL matching and dispatch
@@ -269,6 +271,37 @@ Discovered selectors appear in the **Selectors** tab and in the API response und
 
 ---
 
+## Stealth Fetcher (HTTP)
+
+`fetcher.py` wraps **curl_cffi** for fast, stealthy HTTP (no browser). Use it for APIs, CDN media, and static pages.
+
+| Feature | Detail |
+|---------|--------|
+| TLS fingerprint | Impersonate Chrome / Edge / Safari (`impersonate="chrome"`) |
+| Headers | Matching browser headers + optional `stealthy_headers` (`Sec-Fetch-*`, Accept-Language, Referer) |
+| HTTP/3 | Opt-in with `http3=True` (auto-falls back if the peer rejects QUIC) |
+| Fallback | If `curl_cffi` is missing, uses `urllib` (no fingerprint spoofing) |
+
+Media downloads already go through Fetcher. Standalone usage:
+
+```python
+from fetcher import Fetcher, FetcherSession
+
+# One-shot GET with Chrome TLS fingerprint
+r = Fetcher.get("https://example.com", stealthy_headers=True)
+print(r.status_code, r.text[:200])
+
+# Prefer HTTP/3 when the server supports it
+r = Fetcher.get("https://cloudflare-http3-demo.zone", http3=True, impersonate="chrome")
+
+# Session with cookies + proxy
+with FetcherSession(proxy="http://127.0.0.1:7890", impersonate="chrome") as s:
+    s.get("https://example.com/login")
+    data = s.post("https://example.com/api", json_body={"q": "test"}).json()
+```
+
+---
+
 ## API reference
 
 ### `GET /api/health`
@@ -279,7 +312,7 @@ Health check and version info.
 {
   "status": "ok",
   "version": "1.3.0",
-  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile"]
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher"]
 }
 ```
 

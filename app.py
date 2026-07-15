@@ -105,7 +105,13 @@ async def health():
     return {
         "status": "ok",
         "version": "1.3.0",
-        "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile"],
+        "features": [
+            "video_platforms",
+            "wbi_comments",
+            "download_media",
+            "saved_profile",
+            "stealth_fetcher",
+        ],
     }
 
 

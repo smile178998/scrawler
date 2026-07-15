@@ -55,6 +55,7 @@
 - **Selectors 选项卡** — 显示方法、置信度与发现的选择器，一键应用到表单
 
 ### 反检测与可靠性
+- **隐秘 Fetcher**（`fetcher.py`）— 基于 `curl_cffi` 的快速 HTTP：浏览器 TLS/JA3 指纹、真实标头、可选 HTTP/3
 - **系统 Chrome** 支持（指纹比内置 Chromium 更真实）
 - **playwright-stealth** + 内置指纹补丁（webdriver、WebGL、请求头）
 - 随机浏览器配置（UA、分辨率、语言、时区）
@@ -76,6 +77,7 @@ spaider_crawler/
 ├── scraper_core.py     # Playwright 管道 + 内容解析
 ├── selector_engine.py  # 智能 CSS 选择器发现（启发式 + AI）
 ├── media_downloader.py # 自动下载图片/视频；ffmpeg 合并；MIME 类型
+├── fetcher.py          # 隐秘 HTTP 客户端（TLS 指纹 + HTTP/3，基于 curl_cffi）
 ├── video_platforms/    # 多平台视频元数据与流媒体提取
 │   ├── __init__.py     # 检测 / 提取 / 合并入口
 │   ├── registry.py     # 平台 URL 匹配与调度
@@ -269,6 +271,37 @@ HTML → DOM 评分 → 生成 CSS 选择器 → 验证 → 重新提取
 
 ---
 
+## 隐秘 Fetcher（HTTP）
+
+`fetcher.py` 基于 **curl_cffi**，提供快速、隐秘的 HTTP 请求（无需浏览器）。适合 API、CDN 媒体与静态页面。
+
+| 能力 | 说明 |
+|------|------|
+| TLS 指纹 | 模拟 Chrome / Edge / Safari（`impersonate="chrome"`） |
+| 请求头 | 与浏览器匹配的标头 + 可选 `stealthy_headers`（`Sec-Fetch-*`、语言、Referer） |
+| HTTP/3 | `http3=True` 启用（对端不支持 QUIC 时自动回退） |
+| 回退 | 未安装 `curl_cffi` 时使用 `urllib`（无指纹伪装） |
+
+媒体下载已走 Fetcher。独立用法：
+
+```python
+from fetcher import Fetcher, FetcherSession
+
+# 单次 GET，带 Chrome TLS 指纹
+r = Fetcher.get("https://example.com", stealthy_headers=True)
+print(r.status_code, r.text[:200])
+
+# 服务器支持时优先 HTTP/3
+r = Fetcher.get("https://cloudflare-http3-demo.zone", http3=True, impersonate="chrome")
+
+# 会话 + Cookie + 代理
+with FetcherSession(proxy="http://127.0.0.1:7890", impersonate="chrome") as s:
+    s.get("https://example.com/login")
+    data = s.post("https://example.com/api", json_body={"q": "test"}).json()
+```
+
+---
+
 ## API 参考
 
 ### `GET /api/health`
@@ -279,7 +312,7 @@ HTML → DOM 评分 → 生成 CSS 选择器 → 验证 → 重新提取
 {
   "status": "ok",
   "version": "1.3.0",
-  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile"]
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher"]
 }
 ```
 

@@ -8,10 +8,10 @@ import re
 import shutil
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
 from typing import Callable
 
+from fetcher import FetchError, fetch_bytes
 from image_utils import normalize_image_url, strip_bilibili_resize
 
 LogFn = Callable[[str], None]
@@ -237,39 +237,79 @@ def _headers_for(url: str, referer: str = "") -> dict[str, str]:
     return headers
 
 
+def _is_image_bytes(data: bytes) -> bool:
+    if len(data) < 8:
+        return False
+    if data[:3] == b"\xff\xd8\xff":
+        return True  # JPEG
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return True
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return False
+
+
 def _download_url(
     url: str,
     dest: Path,
     headers: dict[str, str],
     log: LogFn,
     timeout: int = 120,
+    *,
+    expect: str = "video",
 ) -> Path | None:
+    """Download a URL via stealth Fetcher.
+
+    ``expect`` is ``"video"`` or ``"image"`` — controls content validation.
+    """
     url = _normalize_url(url)
     if not url.startswith(("http://", "https://")):
         return None
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
-            content_type = resp.headers.get("Content-Type", "")
+        data, content_type, status = fetch_bytes(
+            url,
+            headers=headers,
+            timeout=float(timeout),
+            impersonate="chrome",
+            http3=False,
+            referer=headers.get("Referer"),
+        )
+        if status >= 400:
+            log(f"[Download] Failed — HTTP {status}")
+            return None
 
         if _is_html_or_text(data):
-            log(f"[Download] Skipped — response is HTML, not video (check login/URL).")
-            return None
-        if not _is_video_bytes(data):
-            log(f"[Download] Skipped — downloaded content is not a video stream.")
+            log(f"[Download] Skipped — response is HTML/text, not media.")
             return None
 
-        ext = _sniff_video_ext(data, content_type)
+        if expect == "video":
+            if not _is_video_bytes(data):
+                log(f"[Download] Skipped — downloaded content is not a video stream.")
+                return None
+            ext = _sniff_video_ext(data, content_type)
+            dest = dest.with_suffix(ext)
+            dest.write_bytes(data)
+            final = _finalize_saved_video(dest, log)
+            if not final:
+                return None
+            log(f"[Download] Saved {final.name} ({final.stat().st_size:,} bytes)")
+            return final
+
+        # image
+        if not _is_image_bytes(data):
+            log(f"[Download] Skipped — downloaded content is not an image.")
+            return None
+        ext = _guess_ext(url, content_type, default=".jpg")
+        if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            ext = ".jpg"
         dest = dest.with_suffix(ext)
         dest.write_bytes(data)
-        final = _finalize_saved_video(dest, log)
-        if not final:
-            return None
-        log(f"[Download] Saved {final.name} ({final.stat().st_size:,} bytes)")
-        return final
-    except Exception as exc:
+        log(f"[Download] Saved {dest.name} ({dest.stat().st_size:,} bytes)")
+        return dest
+    except (FetchError, OSError, Exception) as exc:
         log(f"[Download] Failed — {exc}")
         return None
 
@@ -449,6 +489,7 @@ def download_media(
             _headers_for(url, referer),
             log,
             timeout=90,
+            expect="image",
         )
         if dest:
             downloaded_images.append(_entry(root, dest, url))
