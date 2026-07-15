@@ -111,6 +111,7 @@ async def health():
             "download_media",
             "saved_profile",
             "stealth_fetcher",
+            "dynamic_fetcher",
         ],
     }
 

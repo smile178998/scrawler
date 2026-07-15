@@ -56,6 +56,7 @@
 
 ### 反检测与可靠性
 - **隐秘 Fetcher**（`fetcher.py`）— 基于 `curl_cffi` 的快速 HTTP：浏览器 TLS/JA3 指纹、真实标头、可选 HTTP/3
+- **动态 Fetcher**（`dynamic_fetcher.py`）— 完整 Playwright 浏览器加载 JS/SPA 页面；支持 Chromium 或系统 **Google Chrome**
 - **系统 Chrome** 支持（指纹比内置 Chromium 更真实）
 - **playwright-stealth** + 内置指纹补丁（webdriver、WebGL、请求头）
 - 随机浏览器配置（UA、分辨率、语言、时区）
@@ -78,6 +79,7 @@ spaider_crawler/
 ├── selector_engine.py  # 智能 CSS 选择器发现（启发式 + AI）
 ├── media_downloader.py # 自动下载图片/视频；ffmpeg 合并；MIME 类型
 ├── fetcher.py          # 隐秘 HTTP 客户端（TLS 指纹 + HTTP/3，基于 curl_cffi）
+├── dynamic_fetcher.py  # Playwright DynamicFetcher（Chromium / Google Chrome）
 ├── video_platforms/    # 多平台视频元数据与流媒体提取
 │   ├── __init__.py     # 检测 / 提取 / 合并入口
 │   ├── registry.py     # 平台 URL 匹配与调度
@@ -302,6 +304,42 @@ with FetcherSession(proxy="http://127.0.0.1:7890", impersonate="chrome") as s:
 
 ---
 
+## 动态 Fetcher（浏览器）
+
+`dynamic_fetcher.py` 使用 **Playwright** 加载依赖 JavaScript 的页面。支持内置 **Chromium** 与系统已安装的 **Google Chrome**。
+
+| 选项 | 含义 |
+|------|------|
+| `real_chrome=True`（或 `use_chrome=True`） | 启动系统 Google Chrome；不可用时回退 Chromium |
+| `headless` | 无头（默认）或有界面 |
+| `network_idle` / `wait` / `wait_selector` | 导航后的等待策略 |
+| `page_action` / `page_setup` | 自定义 Playwright 钩子 |
+| `disable_resources` | 屏蔽图片/字体/CSS 以加速 |
+| `proxy` / `cookies` / `extra_headers` | 会话控制 |
+
+```python
+from dynamic_fetcher import DynamicFetcher, DynamicSession
+
+r = DynamicFetcher.fetch(
+    "https://spa.example.com",
+    real_chrome=True,
+    headless=True,
+    network_idle=True,
+    wait=1500,
+    wait_selector="main",
+)
+print(r.title, r.status_code, r.browser_engine)
+
+# 复用同一浏览器打开多个页面
+with DynamicSession(real_chrome=True, headless=True) as session:
+    home = session.fetch("https://example.com")
+    about = session.fetch("https://example.com/about")
+```
+
+> 静态页 / API / CDN 优先用 **Fetcher**；DOM 由 JavaScript 生成时用 **DynamicFetcher**。
+
+---
+
 ## API 参考
 
 ### `GET /api/health`
@@ -312,7 +350,7 @@ with FetcherSession(proxy="http://127.0.0.1:7890", impersonate="chrome") as s:
 {
   "status": "ok",
   "version": "1.3.0",
-  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher"]
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher", "dynamic_fetcher"]
 }
 ```
 

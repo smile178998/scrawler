@@ -56,6 +56,7 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 
 ### Anti-detection & reliability
 - **Stealth Fetcher** (`fetcher.py`) — fast HTTP via `curl_cffi`: browser TLS/JA3 fingerprint, realistic headers, optional HTTP/3
+- **Dynamic Fetcher** (`dynamic_fetcher.py`) — full Playwright browser for JS/SPA pages; Chromium or system **Google Chrome**
 - **System Chrome** support (more realistic fingerprint than bundled Chromium)
 - **playwright-stealth** + built-in fingerprint patches (webdriver, WebGL, headers)
 - Randomized browser profiles (UA, viewport, locale, timezone)
@@ -78,6 +79,7 @@ spaider_crawler/
 ├── selector_engine.py  # Smart CSS selector discovery (heuristic + AI)
 ├── media_downloader.py # Auto-download images/videos; ffmpeg merge; MIME types
 ├── fetcher.py          # Stealth HTTP client (TLS fingerprint + HTTP/3 via curl_cffi)
+├── dynamic_fetcher.py  # Playwright DynamicFetcher (Chromium / Google Chrome)
 ├── video_platforms/    # Multi-platform video metadata + stream extraction
 │   ├── __init__.py     # detect / extract / merge entry points
 │   ├── registry.py     # Platform URL matching and dispatch
@@ -302,6 +304,42 @@ with FetcherSession(proxy="http://127.0.0.1:7890", impersonate="chrome") as s:
 
 ---
 
+## Dynamic Fetcher (browser)
+
+`dynamic_fetcher.py` uses **Playwright** for pages that need JavaScript. Supports bundled **Chromium** and installed **Google Chrome**.
+
+| Option | Meaning |
+|--------|---------|
+| `real_chrome=True` (or `use_chrome=True`) | Launch system Google Chrome; falls back to Chromium |
+| `headless` | Hidden (default) or visible browser |
+| `network_idle` / `wait` / `wait_selector` | Wait strategies after navigation |
+| `page_action` / `page_setup` | Custom Playwright hooks |
+| `disable_resources` | Block images/fonts/CSS for speed |
+| `proxy` / `cookies` / `extra_headers` | Session controls |
+
+```python
+from dynamic_fetcher import DynamicFetcher, DynamicSession
+
+r = DynamicFetcher.fetch(
+    "https://spa.example.com",
+    real_chrome=True,
+    headless=True,
+    network_idle=True,
+    wait=1500,
+    wait_selector="main",
+)
+print(r.title, r.status_code, r.browser_engine)
+
+# Reuse one browser for multiple pages
+with DynamicSession(real_chrome=True, headless=True) as session:
+    home = session.fetch("https://example.com")
+    about = session.fetch("https://example.com/about")
+```
+
+> Prefer **Fetcher** for static/API/CDN requests; use **DynamicFetcher** when the DOM is built by JavaScript.
+
+---
+
 ## API reference
 
 ### `GET /api/health`
@@ -312,7 +350,7 @@ Health check and version info.
 {
   "status": "ok",
   "version": "1.3.0",
-  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher"]
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher", "dynamic_fetcher"]
 }
 ```
 
