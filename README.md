@@ -4,7 +4,7 @@ A Playwright-powered web scraper with a FastAPI UI, plus a three-tier programmat
 
 **Language / 语言：** **English** | [简体中文](README_zh-CN.md)
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey) ![Version](https://img.shields.io/badge/version-1.3.0-blue) ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey) ![Version](https://img.shields.io/badge/version-1.3.0-blue) ![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
 
 ---
 
@@ -407,4 +407,4 @@ Tabs: Text · Comments · **Videos** · Images · **Selectors** · Metadata · L
 
 ## License
 
-[MIT](LICENSE) © 2026 Nameless
+[BSD 3-Clause](LICENSE) © 2026 Nameless
