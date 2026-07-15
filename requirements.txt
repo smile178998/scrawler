@@ -8,3 +8,7 @@ playwright-stealth>=1.0.6
 python-multipart>=0.0.9
 python-dotenv>=1.0.0
 curl_cffi>=0.7.0
+# Optional — stronger StealthyFetcher engine (recommended for Cloudflare pages):
+#   pip install patchright
+#   python -m patchright install chrome
+# patchright>=1.49.0

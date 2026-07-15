@@ -57,6 +57,7 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 ### Anti-detection & reliability
 - **Stealth Fetcher** (`fetcher.py`) — fast HTTP via `curl_cffi`: browser TLS/JA3 fingerprint, realistic headers, optional HTTP/3
 - **Dynamic Fetcher** (`dynamic_fetcher.py`) — full Playwright browser for JS/SPA pages; Chromium or system **Google Chrome**
+- **Stealthy Fetcher** (`stealthy_fetcher.py`) — Patchright/Playwright + fingerprint spoofing; `solve_cloudflare` for Turnstile/Interstitial
 - **System Chrome** support (more realistic fingerprint than bundled Chromium)
 - **playwright-stealth** + built-in fingerprint patches (webdriver, WebGL, headers)
 - Randomized browser profiles (UA, viewport, locale, timezone)
@@ -80,6 +81,7 @@ spaider_crawler/
 ├── media_downloader.py # Auto-download images/videos; ffmpeg merge; MIME types
 ├── fetcher.py          # Stealth HTTP client (TLS fingerprint + HTTP/3 via curl_cffi)
 ├── dynamic_fetcher.py  # Playwright DynamicFetcher (Chromium / Google Chrome)
+├── stealthy_fetcher.py # StealthyFetcher — fingerprint spoofing + Cloudflare solver
 ├── video_platforms/    # Multi-platform video metadata + stream extraction
 │   ├── __init__.py     # detect / extract / merge entry points
 │   ├── registry.py     # Platform URL matching and dispatch
@@ -340,6 +342,42 @@ with DynamicSession(real_chrome=True, headless=True) as session:
 
 ---
 
+## Stealthy Fetcher (anti-bot)
+
+`stealthy_fetcher.py` is the strongest local browser tier: **Patchright** (if installed) or Playwright, plus fingerprint spoofing and optional Cloudflare challenge automation.
+
+| Option | Meaning |
+|--------|---------|
+| `solve_cloudflare=True` | Detect & clear Turnstile / interstitial (managed, interactive, non-interactive, embedded) |
+| `hide_canvas=True` | Canvas noise against fingerprinting |
+| `block_webrtc=True` | Stop WebRTC local IP leaks |
+| `allow_webgl=True` | Keep WebGL on (recommended — many WAFs check it) |
+| `real_chrome=True` | Prefer system Google Chrome |
+| `humanize=True` | Mouse jitter (auto-on when solving CF) |
+
+```python
+from stealthy_fetcher import StealthyFetcher, StealthySession
+
+r = StealthyFetcher.fetch(
+    "https://protected.example",
+    solve_cloudflare=True,
+    hide_canvas=True,
+    block_webrtc=True,
+    real_chrome=True,
+    headless=True,
+    timeout=60000,
+)
+print(r.title, r.extras.get("cloudflare_solved"), r.browser_engine)
+
+# Install stronger engine (recommended):
+#   pip install patchright
+#   python -m patchright install chrome
+```
+
+> Cloudflare solving presents a realistic browser and automates the UI — it does not break CAPTCHA cryptography. For hardest sites, use **Visible** mode + a clean residential proxy.
+
+---
+
 ## API reference
 
 ### `GET /api/health`
@@ -350,7 +388,7 @@ Health check and version info.
 {
   "status": "ok",
   "version": "1.3.0",
-  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher", "dynamic_fetcher"]
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher", "dynamic_fetcher", "stealthy_fetcher"]
 }
 ```
 

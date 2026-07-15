@@ -57,6 +57,7 @@
 ### 反检测与可靠性
 - **隐秘 Fetcher**（`fetcher.py`）— 基于 `curl_cffi` 的快速 HTTP：浏览器 TLS/JA3 指纹、真实标头、可选 HTTP/3
 - **动态 Fetcher**（`dynamic_fetcher.py`）— 完整 Playwright 浏览器加载 JS/SPA 页面；支持 Chromium 或系统 **Google Chrome**
+- **反机器人 Fetcher**（`stealthy_fetcher.py`）— Patchright/Playwright + fingerprint 伪装；`solve_cloudflare` 处理 Turnstile/Interstitial
 - **系统 Chrome** 支持（指纹比内置 Chromium 更真实）
 - **playwright-stealth** + 内置指纹补丁（webdriver、WebGL、请求头）
 - 随机浏览器配置（UA、分辨率、语言、时区）
@@ -80,6 +81,7 @@ spaider_crawler/
 ├── media_downloader.py # 自动下载图片/视频；ffmpeg 合并；MIME 类型
 ├── fetcher.py          # 隐秘 HTTP 客户端（TLS 指纹 + HTTP/3，基于 curl_cffi）
 ├── dynamic_fetcher.py  # Playwright DynamicFetcher（Chromium / Google Chrome）
+├── stealthy_fetcher.py # StealthyFetcher — 指纹伪装 + Cloudflare 挑战处理
 ├── video_platforms/    # 多平台视频元数据与流媒体提取
 │   ├── __init__.py     # 检测 / 提取 / 合并入口
 │   ├── registry.py     # 平台 URL 匹配与调度
@@ -340,6 +342,42 @@ with DynamicSession(real_chrome=True, headless=True) as session:
 
 ---
 
+## 反机器人 Fetcher（Stealthy）
+
+`stealthy_fetcher.py` 是本地最强的浏览器层级：优先 **Patchright**（已安装时），否则 Playwright；并提供 fingerprint 伪装与 Cloudflare 挑战自动化。
+
+| 选项 | 含义 |
+|------|------|
+| `solve_cloudflare=True` | 检测并处理 Turnstile / 间隙页（managed / interactive / non-interactive / embedded） |
+| `hide_canvas=True` | Canvas 噪声防指纹 |
+| `block_webrtc=True` | 阻止 WebRTC 泄露本地 IP |
+| `allow_webgl=True` | 保持 WebGL 开启（推荐，很多 WAF 会检查） |
+| `real_chrome=True` | 优先系统 Google Chrome |
+| `humanize=True` | 鼠标抖动（启用 CF 求解时自动打开） |
+
+```python
+from stealthy_fetcher import StealthyFetcher, StealthySession
+
+r = StealthyFetcher.fetch(
+    "https://protected.example",
+    solve_cloudflare=True,
+    hide_canvas=True,
+    block_webrtc=True,
+    real_chrome=True,
+    headless=True,
+    timeout=60000,
+)
+print(r.title, r.extras.get("cloudflare_solved"), r.browser_engine)
+
+# 推荐安装更强引擎：
+#   pip install patchright
+#   python -m patchright install chrome
+```
+
+> Cloudflare 求解是通过更真实的浏览器环境 + UI 自动化让挑战自行通过，并非破解验证码密码学。最难的站点请配合「有界面」模式与干净的住宅代理。
+
+---
+
 ## API 参考
 
 ### `GET /api/health`
@@ -350,7 +388,7 @@ with DynamicSession(real_chrome=True, headless=True) as session:
 {
   "status": "ok",
   "version": "1.3.0",
-  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher", "dynamic_fetcher"]
+  "features": ["video_platforms", "wbi_comments", "download_media", "saved_profile", "stealth_fetcher", "dynamic_fetcher", "stealthy_fetcher"]
 }
 ```
 

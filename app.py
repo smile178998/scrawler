@@ -112,6 +112,7 @@ async def health():
             "saved_profile",
             "stealth_fetcher",
             "dynamic_fetcher",
+            "stealthy_fetcher",
         ],
     }
 
