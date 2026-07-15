@@ -67,6 +67,7 @@ A Playwright-powered web scraper with a FastAPI web UI. It launches a real Chrom
 - Navigation retry on transient network errors; dead env proxies auto-skipped
 - HTTP/SOCKS5 **proxy** support (UI field or `SCRAPER_PROXY` / `HTTP_PROXY` env vars)
 - **ProxyRotator** — round-robin / random / custom strategies for all Session types; per-request `proxy=` override
+- **Domain / ad blocking** — `blocked_domains` + `block_ads` (~3,500 trackers) on browser fetchers
 - Configurable JS wait time and auto-scroll
 - **Port auto-selection** — if 8000 is busy, tries 8001+ automatically
 
@@ -86,6 +87,10 @@ spaider_crawler/
 ├── session_store.py    # Cookie / state persistence helpers
 ├── sessions.py         # Unified exports: FetcherSession / DynamicSession / StealthySession
 ├── proxy_rotator.py    # ProxyRotator — round-robin / random / custom strategies
+├── request_blocking.py # Domain + ad/tracker request blocking for browser fetchers
+├── ad_domains.py       # Loader for bundled ~3,500 ad/tracker domains
+├── data/
+│   └── ad_domains.txt  # Peter Lowe ad/tracker host list
 ├── video_platforms/    # Multi-platform video metadata + stream extraction
 │   ├── __init__.py     # detect / extract / merge entry points
 │   ├── registry.py     # Platform URL matching and dispatch
@@ -321,6 +326,8 @@ with FetcherSession(proxy="http://127.0.0.1:7890", impersonate="chrome") as s:
 | `network_idle` / `wait` / `wait_selector` | Wait strategies after navigation |
 | `page_action` / `page_setup` | Custom Playwright hooks |
 | `disable_resources` | Block images/fonts/CSS for speed |
+| `blocked_domains` | Set/list of hostnames to block (subdomains matched) |
+| `block_ads` | Enable built-in ~3,500 ad/tracker domain blocklist |
 | `proxy` / `cookies` / `extra_headers` | Session controls |
 
 ```python
@@ -454,6 +461,36 @@ with DynamicSession(proxy_rotator=ProxyRotator(proxies, strategy=sticky)) as s:
 ```
 
 Failed proxies can be skipped: ``rotator.mark_failed(proxy)`` / ``rotator.reset_failures()``.
+
+---
+
+## Domain & ad blocking
+
+Browser fetchers (`DynamicSession` / `StealthySession`) can abort requests before they leave the browser — no DNS/TCP for blocked hosts.
+
+| Option | Effect |
+|--------|--------|
+| `blocked_domains={"tracker.net", "ads.example.com"}` | Block those domains **and all subdomains** |
+| `block_ads=True` | Block ~3,500 known ad/tracker hosts (Peter Lowe list) |
+| `disable_resources=True` | Also drop image/font/stylesheet/media (speed) |
+
+```python
+from dynamic_fetcher import DynamicFetcher
+from stealthy_fetcher import StealthyFetcher
+
+# Custom domains + built-in ads
+r = DynamicFetcher.fetch(
+    "https://news.example",
+    block_ads=True,
+    blocked_domains={"metrics.vendor.com", "cdn.doubleclick.net"},
+)
+
+# Stealthy session
+with StealthySession(block_ads=True, blocked_domains={"evil.tracker"}) as s:
+    page = s.fetch("https://protected.example")
+```
+
+Check list size: ``from ad_domains import ad_domain_count; print(ad_domain_count())``.
 
 ---
 

@@ -32,7 +32,6 @@ from dynamic_fetcher import (
     _as_bool_chrome,
     _normalize_proxy,
     _pick_profile,
-    _block_heavy_resources,
 )
 
 # Prefer patchright (drops many Playwright CDP / automation leaks).
@@ -427,6 +426,8 @@ class _StealthOptions:
     block_webrtc: bool = True
     allow_webgl: bool = True
     disable_resources: bool = False
+    blocked_domains: Optional[Sequence[str]] = None
+    block_ads: bool = False
     network_idle: bool = False
     load_dom: bool = True
     timeout: int = DEFAULT_TIMEOUT_MS
@@ -480,6 +481,8 @@ class StealthySession:
             block_webrtc=bool(kwargs.pop("block_webrtc", True)),
             allow_webgl=bool(kwargs.pop("allow_webgl", True)),
             disable_resources=bool(kwargs.pop("disable_resources", False)),
+            blocked_domains=kwargs.pop("blocked_domains", None),
+            block_ads=bool(kwargs.pop("block_ads", False)),
             network_idle=bool(kwargs.pop("network_idle", False)),
             load_dom=bool(kwargs.pop("load_dom", True)),
             timeout=timeout,
@@ -506,8 +509,6 @@ class StealthySession:
         for soft in (
             "selector_config",
             "custom_config",
-            "block_ads",
-            "blocked_domains",
             "dns_over_https",
             "simulate_stealth",
         ):
@@ -849,8 +850,19 @@ class StealthySession:
                 except Exception:
                     pass
 
-            if opts.disable_resources:
-                _block_heavy_resources(page)
+            if (
+                opts.disable_resources
+                or opts.block_ads
+                or opts.blocked_domains
+            ):
+                from request_blocking import apply_request_blocking
+
+                apply_request_blocking(
+                    page,
+                    disable_resources=opts.disable_resources,
+                    blocked_domains=opts.blocked_domains,
+                    block_ads=opts.block_ads,
+                )
 
             if extra_headers and not ephemeral:
                 page.set_extra_http_headers(

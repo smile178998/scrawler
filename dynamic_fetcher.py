@@ -66,6 +66,8 @@ class _SessionOptions:
     headless: bool = True
     real_chrome: bool = True
     disable_resources: bool = False
+    blocked_domains: Optional[Sequence[str]] = None
+    block_ads: bool = False
     network_idle: bool = False
     load_dom: bool = True
     timeout: int = DEFAULT_TIMEOUT_MS
@@ -150,15 +152,10 @@ def _inject_cookies(ctx: BrowserContext, cookies: CookieInput, url: str) -> None
 
 
 def _block_heavy_resources(page: Page) -> None:
-    blocked = {"image", "media", "font", "stylesheet"}
+    """Backward-compatible helper — prefer :func:`request_blocking.apply_request_blocking`."""
+    from request_blocking import apply_request_blocking
 
-    def handler(route: Any) -> None:
-        if route.request.resource_type in blocked:
-            route.abort()
-        else:
-            route.continue_()
-
-    page.route("**/*", handler)
+    apply_request_blocking(page, disable_resources=True)
 
 
 class DynamicSession:
@@ -186,6 +183,8 @@ class DynamicSession:
             headless=bool(kwargs.pop("headless", True)),
             real_chrome=real_chrome,
             disable_resources=bool(kwargs.pop("disable_resources", False)),
+            blocked_domains=kwargs.pop("blocked_domains", None),
+            block_ads=bool(kwargs.pop("block_ads", False)),
             network_idle=bool(kwargs.pop("network_idle", False)),
             load_dom=bool(kwargs.pop("load_dom", True)),
             timeout=int(kwargs.pop("timeout", DEFAULT_TIMEOUT_MS)),
@@ -209,8 +208,6 @@ class DynamicSession:
         )
         kwargs.pop("selector_config", None)
         kwargs.pop("custom_config", None)
-        kwargs.pop("block_ads", None)
-        kwargs.pop("blocked_domains", None)
         kwargs.pop("dns_over_https", None)
         if kwargs:
             extra = dict(self.opts.additional_args or {})
@@ -497,8 +494,19 @@ class DynamicSession:
                 if HAS_STEALTH and self.opts.simulate_stealth:
                     _stealth.apply_stealth_sync(page)
 
-                if self.opts.disable_resources:
-                    _block_heavy_resources(page)
+                if (
+                    self.opts.disable_resources
+                    or self.opts.block_ads
+                    or self.opts.blocked_domains
+                ):
+                    from request_blocking import apply_request_blocking
+
+                    apply_request_blocking(
+                        page,
+                        disable_resources=self.opts.disable_resources,
+                        blocked_domains=self.opts.blocked_domains,
+                        block_ads=self.opts.block_ads,
+                    )
 
                 if self.opts.page_setup:
                     self.opts.page_setup(page)

@@ -41,6 +41,12 @@ from proxy_rotator import (
     proxy_to_url,
     is_proxy_error,
 )
+from request_blocking import (
+    apply_request_blocking,
+    is_domain_blocked,
+    merge_blocked_domains,
+)
+from ad_domains import ad_domain_count, load_ad_domains
 
 __all__ = [
     "FetcherSession",
@@ -61,4 +67,9 @@ __all__ = [
     "normalize_proxy",
     "proxy_to_url",
     "is_proxy_error",
+    "apply_request_blocking",
+    "is_domain_blocked",
+    "merge_blocked_domains",
+    "ad_domain_count",
+    "load_ad_domains",
 ]

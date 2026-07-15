@@ -67,6 +67,7 @@
 - 网络错误自动重试导航；失效的环境变量代理自动跳过
 - HTTP/SOCKS5 **代理** 支持（界面填写或 `SCRAPER_PROXY` / `HTTP_PROXY` 环境变量）
 - **ProxyRotator** — 所有 Session 支持轮询 / 随机 / 自定义策略；单次请求可用 `proxy=` 覆盖
+- **域名 / 广告屏蔽** — 浏览器 Fetcher 支持 `blocked_domains` + `block_ads`（约 3500 个追踪域名）
 - 可配置 JS 等待时间与自动滚动
 - **端口自动选择** — 8000 被占用时自动尝试 8001+
 
@@ -86,6 +87,10 @@ spaider_crawler/
 ├── session_store.py    # Cookie / 状态持久化工具
 ├── sessions.py         # 统一导出：FetcherSession / DynamicSession / StealthySession
 ├── proxy_rotator.py    # ProxyRotator — 轮询 / 随机 / 自定义策略
+├── request_blocking.py # 浏览器 Fetcher：域名 / 广告请求屏蔽
+├── ad_domains.py       # 内置约 3500 个广告/追踪域名加载器
+├── data/
+│   └── ad_domains.txt  # Peter Lowe 广告域名列表
 ├── video_platforms/    # 多平台视频元数据与流媒体提取
 │   ├── __init__.py     # 检测 / 提取 / 合并入口
 │   ├── registry.py     # 平台 URL 匹配与调度
@@ -321,6 +326,8 @@ with FetcherSession(proxy="http://127.0.0.1:7890", impersonate="chrome") as s:
 | `network_idle` / `wait` / `wait_selector` | 导航后的等待策略 |
 | `page_action` / `page_setup` | 自定义 Playwright 钩子 |
 | `disable_resources` | 屏蔽图片/字体/CSS 以加速 |
+| `blocked_domains` | 要屏蔽的域名集合（含子域名） |
+| `block_ads` | 启用内置约 3500 个广告/追踪域名列表 |
 | `proxy` / `cookies` / `extra_headers` | 会话控制 |
 
 ```python
@@ -454,6 +461,34 @@ with DynamicSession(proxy_rotator=ProxyRotator(proxies, strategy=sticky)) as s:
 ```
 
 失败代理可跳过：``rotator.mark_failed(proxy)`` / ``rotator.reset_failures()``。
+
+---
+
+## 域名与广告屏蔽
+
+浏览器 Fetcher（`DynamicSession` / `StealthySession`）可在请求发出前直接 abort——被屏蔽域名不会产生 DNS/TCP。
+
+| 选项 | 作用 |
+|------|------|
+| `blocked_domains={"tracker.net", "ads.example.com"}` | 屏蔽这些域名及其**所有子域名** |
+| `block_ads=True` | 屏蔽约 3,500 个已知广告/追踪域名（Peter Lowe 列表） |
+| `disable_resources=True` | 同时丢弃图片/字体/样式表/媒体（加速） |
+
+```python
+from dynamic_fetcher import DynamicFetcher
+from stealthy_fetcher import StealthySession
+
+r = DynamicFetcher.fetch(
+    "https://news.example",
+    block_ads=True,
+    blocked_domains={"metrics.vendor.com", "cdn.doubleclick.net"},
+)
+
+with StealthySession(block_ads=True, blocked_domains={"evil.tracker"}) as s:
+    page = s.fetch("https://protected.example")
+```
+
+查看列表规模：``from ad_domains import ad_domain_count; print(ad_domain_count())``。
 
 ---
 
