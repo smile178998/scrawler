@@ -407,4 +407,4 @@ Tabs: Text · Comments · **Videos** · Images · **Selectors** · Metadata · L
 
 ## License
 
-MIT License — see [LICENSE](LICENSE).
+[MIT](LICENSE) © 2026 Nameless
